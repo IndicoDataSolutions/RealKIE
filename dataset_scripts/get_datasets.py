@@ -131,7 +131,7 @@ def get_dataset(name, dataset_id, labelset_id, host="app.indico.io", api_token_p
             image_files.append(page_image)
             with open(page_image, "wb") as fp:
                 downloaded = False
-                for template, offset in [(READAPI_PNG_TEMPLATE, 0), (PNG_TEMPLATE, 1)]:
+                for template, offset in [(READAPI_PNG_TEMPLATE, 0), (PNG_TEMPLATE, 0)]:
                     print(
                         template.format(
                             page=page["pages"][0]["page_num"],
@@ -154,6 +154,7 @@ def get_dataset(name, dataset_id, labelset_id, host="app.indico.io", api_token_p
                         downloaded = True
                         break
                     except Exception as e:
+                        print(e)
                         pass
                 if not downloaded:
                     raise Exception("Failed to download image")

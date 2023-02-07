@@ -7,7 +7,7 @@ import pandas as pd
 from finetune import SequenceLabeler
 
 def get_dataset_path(dataset_name, split, order_by):
-    return f"{dataset_name}/{split}_w_sparse_tables_ordered_by_{order_by}.csv"
+    return f"{dataset_name}/{split}_w_sparse_tables.csv"
 
 def get_dataset(dataset_name, split, order_by):
     csv = pd.read_csv(get_dataset_path(dataset_name, split, order_by))
@@ -28,7 +28,7 @@ def train_and_eval_model(
     test_data["preds"] = [json.dumps(p) for p in preds]
     results_dir = os.path.join("finetune", dataset)
     os.makedirs(results_dir, exist_ok=True)
-    test_data.to_csv(os.path.join(results_dir, f"predictions_{order_by}.csv"))
+    test_data.to_csv(os.path.join(results_dir, f"predictions_default_read_order.csv"))
 
 if __name__ == "__main__":
     fire.Fire(train_and_eval_model)
