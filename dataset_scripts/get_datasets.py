@@ -15,18 +15,25 @@ from indico.queries import (
     GetDataset,
     DownloadExport, CreateExport
 )
+from indico.client import GraphQLRequest
 
-JSON_TEMPLATE = (
-    "indico-file:///storage/files/{dataset_id}/{file_id}_meta/page_info_{page}.json"
-)
+class GraphQLMagic(GraphQLRequest):
 
-PNG_TEMPLATE = (
-    "indico-file:///storage/files/{dataset_id}/{file_id}_meta/original_{page:05d}_page_{page}.png"
-)
+    def __init__(self, *args, **kwargs):
+        super().__init__(query=self.query, variables=kwargs)
 
-READAPI_PNG_TEMPLATE = (
-    "indico-file:///storage/files/{dataset_id}/{file_id}_meta/original_page_{page}.png"
-)
+class GetDatafileByID(GraphQLMagic):
+    query = """
+    query getDatafileById($datafileId: Int!) {
+        datafile(datafileId: $datafileId) {
+            pages {
+            id
+            pageInfo
+            image
+            }
+        }
+    }
+    """
 
 def get_export(client, dataset_id, labelset_id):
     # Get dataset object
@@ -48,7 +55,6 @@ def get_export(client, dataset_id, labelset_id):
     return csv
 
 def reformat_labels(labels, document):
-    print(labels)
     spans_labels = json.loads(labels)
     old_labels_i = []
     for target in spans_labels["targets"]:
@@ -64,32 +70,23 @@ def reformat_labels(labels, document):
         ]
     return json.dumps(old_labels_i)
 
-def get_label_column(columns):
-    for col in columns:
-        if col not in ['Unnamed: 0', 'Indico_Id', 'document', 'file_id', 'file_name', 'file_url']:
-            return col
 
-def get_ocr(client, file_id, dataset_id):
-    page_num = 0
-    document = []
-    while True:
-        try:
-            # JSONs are 0-indexed                                                                                                                      
-            url = JSON_TEMPLATE.format(
-                file_id=file_id, dataset_id=dataset_id, page=page_num
-            )
+def get_ocr_by_datafile_id(client, datafile_id):
+    """
+    Given an Indico client and a datafile ID, download OCR data for all pages
+    along with page image PNGs for each page.
+    """
+    datafile_meta = client.call(GetDatafileByID(datafileId=datafile_id))
+    page_ocrs, page_images = [], []
+    for page in datafile_meta['datafile']['pages']:
+        page_info = client.call(RetrieveStorageObject(page['pageInfo']))
+        # Could just return page image and save to file in inner loop if required
+        page_image = client.call(RetrieveStorageObject(page['image']))
+        page_ocrs.append(page_info)
+        page_images.append(page_image)
+    return page_ocrs, page_images
 
-            result = client.call(RetrieveStorageObject(url))
-            document.append(result)
-            page_num += 1
-        except IndicoError:
-            if len(document) == 0:
-                print(f"possibly missing permissions for  dataset {dataset_id} retrying")
-                raise
-            traceback.print_exc()
-            return document
-
-def get_dataset(name, dataset_id, labelset_id, host="app.indico.io", api_token_path="prod_api_token.txt"):
+def get_dataset(name, dataset_id, labelset_id, label_col="labels", text_col="text", host="app.indico.io", api_token_path="/home/m/api_keys/prod_api_token.txt"):
     if not os.path.exists(name):
         os.mkdir(name)
         os.mkdir(os.path.join(name, "images"))
@@ -108,71 +105,49 @@ def get_dataset(name, dataset_id, labelset_id, host="app.indico.io", api_token_p
         raw_export.to_csv(export_path)
     else:
         raw_export = pd.read_csv(export_path)
+    if label_col not in raw_export.columns or text_col not in raw_export.columns:
+        print(f"--label_col {label_col} or --text_col not found in export columns {raw_export.columns}")
+        exit(1)
 
     records = raw_export.to_dict("records")
     output_records = []
+
     for i, row in enumerate(records):
-        label_col = get_label_column(row.keys())
         if pd.isna(row[label_col]):
             print("No labels - skipping")
             continue
         filename = str(uuid.uuid4())
-        doc = get_ocr(client, row["file_id"], dataset_id)
-        os.mkdir(os.path.join(name, "images", filename))
-        page_pattern = os.path.join(name, "images", filename, "page_{}.png")
+        file_dir = os.path.join(name, "images", filename)
+        os.makedirs(file_dir, exist_ok=True)
+        local_page_pattern = os.path.join(file_dir, "page_{}.png")
+        page_ocrs, page_images = get_ocr_by_datafile_id(client, row['file_id'])
         output_record = {
-            "ocr": json.dumps(doc),
-            "text": row["document"],
-            "labels": reformat_labels(row[label_col], row["document"]),
+            "ocr": json.dumps(page_ocrs),
+            "text": row[text_col],
+            "labels": reformat_labels(row[label_col], row[text_col]),
         }
         image_files = []
-        for page in doc:
-            page_image = page_pattern.format(page["pages"][0]["page_num"])
-            image_files.append(page_image)
-            with open(page_image, "wb") as fp:
-                downloaded = False
-                for template, offset in [(READAPI_PNG_TEMPLATE, 0), (PNG_TEMPLATE, 0)]:
-                    print(
-                        template.format(
-                            page=page["pages"][0]["page_num"],
-                            file_id=row["file_id"],
-                            dataset_id=dataset_id
-                        )
-                    )
-                    try:
-                        fp.write(
-                            client.call(
-                                RetrieveStorageObject(
-                                    template.format(
-                                        page=page["pages"][0]["page_num"] + offset,
-                                        file_id=row["file_id"],
-                                        dataset_id=dataset_id
-                                    )
-                                )
-                            )
-                        )
-                        downloaded = True
-                        break
-                    except Exception as e:
-                        print(e)
-                        pass
-                if not downloaded:
-                    raise Exception("Failed to download image")
+        for (page_ocr, page_image) in zip(page_ocrs, page_images):
+            local_page_image = local_page_pattern.format(page_ocr["pages"][0]["page_num"])
+            image_files.append(local_page_image)
+            with open(local_page_image, "wb") as fp:
+                fp.write(page_image)
         output_record["image_files"] = json.dumps(image_files)
         document_path = os.path.join(name, "files", filename + "." + row["file_name"].split(".")[-1])
         output_record["document_path"] = document_path
         with open(document_path, "wb") as fp:
             fp.write(client.call(RetrieveStorageObject(row["file_url"])))
         output_records.append(output_record)
+
+    # TODO: consider removing train test split logic
     train_records, test_val_records = train_test_split(output_records, test_size=0.4)
     test_records, val_records = train_test_split(test_val_records, test_size=0.5)
     for split, records in [
-            ("train", train_records),
-            ("test", test_records),
-            ("val", val_records),
+        ("train", train_records),
+        ("test", test_records),
+        ("val", val_records),
     ]:
         pd.DataFrame.from_records(records).to_csv(os.path.join(name, "{}.csv".format(split)))
-    os.remove(export_path)
         
     
 if __name__ == "__main__":
