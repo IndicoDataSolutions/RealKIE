@@ -11,8 +11,21 @@ from collections import defaultdict
 import fire
 import numpy as np
 import pandas as pd
+import torch
 import wandb
 from layoutlmft.data import DataCollatorForKeyValueExtraction
+from layoutlmft.data.image_utils import (
+    Compose,
+    RandomResizedCropAndInterpolationWithTwoPic,
+    pil_loader,
+)
+from timm.data.constants import (
+    IMAGENET_DEFAULT_MEAN,
+    IMAGENET_DEFAULT_STD,
+    IMAGENET_INCEPTION_MEAN,
+    IMAGENET_INCEPTION_STD,
+)
+from torchvision import transforms
 from transformers import (
     AutoConfig,
     AutoModelForTokenClassification,
@@ -29,20 +42,6 @@ from metrics import metrics
 check_min_version("4.5.0")
 
 logger = logging.getLogger(__name__)
-
-import torch
-from layoutlmft.data.image_utils import (
-    Compose,
-    RandomResizedCropAndInterpolationWithTwoPic,
-    pil_loader,
-)
-from timm.data.constants import (
-    IMAGENET_DEFAULT_MEAN,
-    IMAGENET_DEFAULT_STD,
-    IMAGENET_INCEPTION_MEAN,
-    IMAGENET_INCEPTION_STD,
-)
-from torchvision import transforms
 
 TRAINING_LIB = "unilm/layoutlmv3"
 
