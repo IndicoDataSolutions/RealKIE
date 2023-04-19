@@ -1,26 +1,27 @@
 import glob
-import pandas as pd
-import traceback
 import json
-import fire
 import os
+import traceback
 import uuid
 
-from sklearn.model_selection import train_test_split
-
+import fire
+import pandas as pd
 from indico import IndicoClient, IndicoConfig
+from indico.client import GraphQLRequest
 from indico.errors import IndicoError
 from indico.queries import (
-    RetrieveStorageObject,
+    CreateExport,
+    DownloadExport,
     GetDataset,
-    DownloadExport, CreateExport
+    RetrieveStorageObject,
 )
-from indico.client import GraphQLRequest
+from sklearn.model_selection import train_test_split
+
 
 class GraphQLMagic(GraphQLRequest):
-
     def __init__(self, *args, **kwargs):
         super().__init__(query=self.query, variables=kwargs)
+
 
 class GetDatafileByID(GraphQLMagic):
     query = """
@@ -35,17 +36,18 @@ class GetDatafileByID(GraphQLMagic):
     }
     """
 
+
 def get_export(client, dataset_id, labelset_id):
     # Get dataset object
     dataset = client.call(GetDataset(id=dataset_id))
-    
+
     # Create export object using dataset's id and labelset id
     export = client.call(
         CreateExport(
             dataset_id=dataset.id,
             labelset_id=dataset.labelsets[0].id,
             file_info=True,
-            wait=True
+            wait=True,
         )
     )
 
@@ -53,6 +55,7 @@ def get_export(client, dataset_id, labelset_id):
     csv = client.call(DownloadExport(export.id))
     csv = csv.rename(columns=lambda col: col.rsplit("_", 1)[0])
     return csv
+
 
 def reformat_labels(labels, document):
     spans_labels = json.loads(labels)
@@ -78,27 +81,34 @@ def get_ocr_by_datafile_id(client, datafile_id):
     """
     datafile_meta = client.call(GetDatafileByID(datafileId=datafile_id))
     page_ocrs, page_images = [], []
-    for page in datafile_meta['datafile']['pages']:
-        page_info = client.call(RetrieveStorageObject(page['pageInfo']))
+    for page in datafile_meta["datafile"]["pages"]:
+        page_info = client.call(RetrieveStorageObject(page["pageInfo"]))
         # Could just return page image and save to file in inner loop if required
-        page_image = client.call(RetrieveStorageObject(page['image']))
+        page_image = client.call(RetrieveStorageObject(page["image"]))
         page_ocrs.append(page_info)
         page_images.append(page_image)
     return page_ocrs, page_images
 
-def get_dataset(name, dataset_id, labelset_id, label_col="labels", text_col="text", host="app.indico.io", api_token_path="/home/m/api_keys/prod_api_token.txt"):
-    if not os.path.exists(name):
-        os.mkdir(name)
-        os.mkdir(os.path.join(name, "images"))
-        os.mkdir(os.path.join(name, "files"))
 
+def get_dataset(
+    name,
+    dataset_id,
+    labelset_id,
+    label_col="labels",
+    text_col="text",
+    host="app.indico.io",
+    api_token_path="/home/m/api_keys/prod_api_token.txt",
+):
+    dataset_dir = os.path.join("datasets", name)
+    if not os.path.exists(dataset_dir):
+        os.mkdir(dataset_dir)
+        os.mkdir(os.path.join(dataset_dir, "images"))
+        os.mkdir(os.path.join(dataset_dir, "files"))
 
-    my_config = IndicoConfig(
-        host=host, api_token_path=api_token_path,
-    )
+    my_config = IndicoConfig(host=host, api_token_path=api_token_path)
     client = IndicoClient(config=my_config)
 
-    export_path = os.path.join(name, "raw_export.csv")
+    export_path = os.path.join(dataset_dir, "raw_export.csv")
 
     if not os.path.exists(export_path):
         raw_export = get_export(client, dataset_id, labelset_id)
@@ -106,7 +116,9 @@ def get_dataset(name, dataset_id, labelset_id, label_col="labels", text_col="tex
     else:
         raw_export = pd.read_csv(export_path)
     if label_col not in raw_export.columns or text_col not in raw_export.columns:
-        print(f"--label_col {label_col} or --text_col not found in export columns {raw_export.columns}")
+        print(
+            f"--label_col {label_col} or --text_col not found in export columns {raw_export.columns}"
+        )
         exit(1)
 
     records = raw_export.to_dict("records")
@@ -117,10 +129,10 @@ def get_dataset(name, dataset_id, labelset_id, label_col="labels", text_col="tex
             print("No labels - skipping")
             continue
         filename = str(uuid.uuid4())
-        file_dir = os.path.join(name, "images", filename)
+        file_dir = os.path.join(dataset_dir, "images", filename)
         os.makedirs(file_dir, exist_ok=True)
         local_page_pattern = os.path.join(file_dir, "page_{}.png")
-        page_ocrs, page_images = get_ocr_by_datafile_id(client, row['file_id'])
+        page_ocrs, page_images = get_ocr_by_datafile_id(client, row["file_id"])
         output_record = {
             "ocr": json.dumps(page_ocrs),
             "text": row[text_col],
@@ -128,12 +140,16 @@ def get_dataset(name, dataset_id, labelset_id, label_col="labels", text_col="tex
         }
         image_files = []
         for (page_ocr, page_image) in zip(page_ocrs, page_images):
-            local_page_image = local_page_pattern.format(page_ocr["pages"][0]["page_num"])
+            local_page_image = local_page_pattern.format(
+                page_ocr["pages"][0]["page_num"]
+            )
             image_files.append(local_page_image)
             with open(local_page_image, "wb") as fp:
                 fp.write(page_image)
         output_record["image_files"] = json.dumps(image_files)
-        document_path = os.path.join(name, "files", filename + "." + row["file_name"].split(".")[-1])
+        document_path = os.path.join(
+            dataset_dir, "files", filename + "." + row["file_name"].split(".")[-1]
+        )
         output_record["document_path"] = document_path
         with open(document_path, "wb") as fp:
             fp.write(client.call(RetrieveStorageObject(row["file_url"])))
@@ -147,8 +163,10 @@ def get_dataset(name, dataset_id, labelset_id, label_col="labels", text_col="tex
         ("test", test_records),
         ("val", val_records),
     ]:
-        pd.DataFrame.from_records(records).to_csv(os.path.join(name, "{}.csv".format(split)))
-        
-    
+        pd.DataFrame.from_records(records).to_csv(
+            os.path.join(dataset_dir, "{}.csv".format(split))
+        )
+
+
 if __name__ == "__main__":
     fire.Fire(get_dataset)
