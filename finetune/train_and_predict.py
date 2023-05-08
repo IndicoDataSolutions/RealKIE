@@ -2,6 +2,7 @@ import json
 import os
 import tempfile
 import traceback
+import gzip
 
 import fire
 import pandas as pd
@@ -25,16 +26,26 @@ def get_dataset_path(dataset_name, dataset_dir, split):
     return os.path.join(dataset_dir, dataset_name, f"{split}.csv")
 
 
-def get_model_input_from_csv(csv, is_document):
+def get_model_input_from_csv(csv, is_document, dataset_dir):
     if is_document:
-        return [json.loads(o) for o in csv.ocr]
+        ocr = []
+        for ocr_file, text in zip(csv.ocr, csv.text):
+            ocr_file = os.path.join(dataset_dir, ocr_file)
+            with gzip.open(ocr_file, 'rt') as fp:
+                ocr.append(json.loads(fp.read()))
+            assert "\n".join(page["pages"][0]["text"] for page in ocr[-1]) == text
+        return ocr
     return csv.text
 
 
 def get_dataset(dataset_name, dataset_dir, split, is_document):
     csv = pd.read_csv(get_dataset_path(dataset_name, dataset_dir, split))
     labels = [json.loads(l) for l in csv.labels]
-    return get_model_input_from_csv(csv, is_document=is_document), labels
+    for t, l in zip(csv.text, labels):
+        for li in l:
+            assert t[li["start"]: li["end"]] == li["text"]
+            #del li["text"] # Label checking inside finetune assumes labels cannot span pages.
+    return get_model_input_from_csv(csv, is_document=is_document, dataset_dir=dataset_dir), labels
 
 
 def get_base_model(base_model):
@@ -75,7 +86,7 @@ def get_base_model(base_model):
 
 def run_predictions(model, dataset_name, dataset_dir, split, output_path, is_document):
     test_data = pd.read_csv(get_dataset_path(dataset_name, dataset_dir, split))
-    preds = model.predict(get_model_input_from_csv(test_data, is_document=is_document))
+    preds = model.predict(get_model_input_from_csv(test_data, is_document=is_document, dataset_dir=dataset_dir))
     test_data["preds"] = [json.dumps(p) for p in preds]
     test_data.to_csv(output_path)
 
@@ -115,7 +126,7 @@ def get_sweep_config():
     return config
 
 
-def run_agent(sweep_id):
+def run_agent(sweep_id, entity, project):
     def train_model():
         try:
             wandb.init(save_code=True)
@@ -131,21 +142,41 @@ def run_agent(sweep_id):
             print(traceback.format_exc())
             raise
 
-    wandb.agent(sweep_id=sweep_id, function=train_model)
+    wandb.agent(sweep_id=sweep_id, function=train_model, entity=entity, project=project)
+
+def get_matching_sweep(project, entity, sweep_id_config):
+    project = wandb.Api().project(project, entity=entity)
+    try:
+        sweeps = project.sweeps()
+    except wandb.errors.CommError:
+        return None
+    for s in sweeps:
+        sweep_config = s.config["parameters"]
+        if sweep_id_config.items() <= sweep_config.items():
+            return s.id
+    return None
 
 
 def setup_and_run_sweep(
     project, entity, dataset_name, base_model, dataset_dir="/datasets",
 ):
+    sweep_id_config = {
+        "dataset_name": {"value": dataset_name},
+        "dataset_dir": {"value": dataset_dir},
+        "base_model": {"value": base_model},
+        "training_lib": {"value": TRAINING_LIB},
+    }
+    sweep_id = get_matching_sweep(project, entity, sweep_id_config)
+    if sweep_id is not None:
+        print(f"Resuming Sweep with ID: {sweep_id}")
+        run_agent(sweep_id, entity=entity, project=project)
+
     sweep_configs = {
         "method": "bayes",
         "metric": {"name": "val_macro_f1", "goal": "minimize"},
         "parameters": {
             # Add these values in here to make resuming easier.
-            "dataset_name": {"value": dataset_name},
-            "dataset_dir": {"value": dataset_dir},
-            "base_model": {"value": base_model},
-            "training_lib": {"value": TRAINING_LIB},
+            **sweep_id_config,
             # Sweep Params
             "auto_negative_sampling": {"values": [False, True]},
             "max_empty_chunk_ratio": {
@@ -155,7 +186,7 @@ def setup_and_run_sweep(
             },
             "lr": {"distribution": "log_uniform_values", "min": 1e-8, "max": 1e-2},
             "batch_size": {"distribution": "int_uniform", "min": 1, "max": 8},
-            "n_epochs": {"distribution": "int_uniform", "min": 1, "max": 128},
+            "n_epochs": {"distribution": "int_uniform", "min": 1, "max": 16},
             "class_weights": {"values": [None, "linear", "sqrt", "log"]},
             "lr_warmup": {"distribution": "uniform", "min": 0, "max": 0.5},
             "collapse_whitespace": {"values": [True, False]},
@@ -169,7 +200,7 @@ def setup_and_run_sweep(
     }
     sweep_id = wandb.sweep(sweep_configs, project=project, entity=entity)
     print(f"Your sweep id is {sweep_id}")
-    run_agent(sweep_id)
+    run_agent(sweep_id, entity=entity, project=project)
 
 
 if __name__ == "__main__":

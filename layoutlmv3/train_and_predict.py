@@ -7,6 +7,7 @@ import random
 import tempfile
 import traceback
 from collections import defaultdict
+import gzip
 
 import fire
 import numpy as np
@@ -91,7 +92,9 @@ def get_dataset(dataset_name, split, dataset_dir):
     data = []
     for row in csv.to_dict("records"):
         labels = json.loads(row["labels"])
-        ocr = json.loads(row["ocr"])
+        ocr = json.loads()
+        with gzip.open(os.path.join(dataset_dir, row["ocr"]), 'rt') as fp:
+            ocr = json.loads(fp.read())
         images = json.loads(row["image_files"])
         for page_ocr, page_image in zip(ocr, images):
             doc_offset = page_ocr["pages"][0]["doc_offset"]
@@ -521,7 +524,7 @@ def get_sweep_config():
     return config
 
 
-def run_agent(sweep_id):
+def run_agent(sweep_id, entity, project):
     def train_model():
         try:
             wandb.init(save_code=True)
@@ -537,28 +540,49 @@ def run_agent(sweep_id):
             print(traceback.format_exc())
             raise
 
-    wandb.agent(sweep_id=sweep_id, function=train_model)
+    wandb.agent(sweep_id=sweep_id, function=train_model, entity=entity, project=project)
+
+
+def get_matching_sweep(project, entity, sweep_id_config):
+    project = wandb.Api().project(project, entity=entity)
+    try:
+        sweeps = project.sweeps()
+    except wandb.errors.CommError:
+        return None
+    for s in sweeps:
+        sweep_config = s.config["parameters"]
+        if sweep_id_config.items() <= sweep_config.items():
+            return s.id
+    return None
 
 
 def setup_and_run_sweep(
     project, entity, dataset_name, dataset_dir="/datasets",
 ):
+    sweep_id_config = {
+        "dataset_name": {"value": dataset_name},
+        "dataset_dir": {"value": dataset_dir},
+        "base_model": {"value": "layoutlmv3"},
+        "training_lib": {"value": TRAINING_LIB},
+    }
+    sweep_id = get_matching_sweep(project, entity, sweep_id_config)
+    if sweep_id is not None:
+        print(f"Resuming Sweep with ID: {sweep_id}")
+        run_agent(sweep_id, entity=entity, project=project)
+
     sweep_configs = {
         "method": "bayes",
         "metric": {"name": "val_macro_f1", "goal": "minimize"},
         "parameters": {
             # Add these values in here to make resuming easier.
-            "dataset_name": {"value": dataset_name},
-            "dataset_dir": {"value": dataset_dir},
-            "base_model": {"value": "layoutlmv3"},
-            "training_lib": {"value": TRAINING_LIB},
+            **sweep_id_config,
             # Sweep Params
             "empty_chunk_ratio": {
                 "distribution": "log_uniform_values",
                 "min": 1e-2,
                 "max": 1000.0,
             },
-            "num_train_epochs": {"distribution": "int_uniform", "min": 1, "max": 128},
+            "num_train_epochs": {"distribution": "int_uniform", "min": 1, "max": 16},
             "per_device_train_batch_size": {
                 "distribution": "int_uniform",
                 "min": 1,
@@ -600,7 +624,7 @@ def setup_and_run_sweep(
     }
     sweep_id = wandb.sweep(sweep_configs, project=project, entity=entity)
     print(f"Your sweep id is {sweep_id}")
-    run_agent(sweep_id)
+    run_agent(sweep_id, entity=entity, project=project)
 
 
 if __name__ == "__main__":
