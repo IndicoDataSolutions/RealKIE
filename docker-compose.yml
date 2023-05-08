@@ -1,0 +1,55 @@
+version: "2.3"
+
+services:
+  layoutlmv3:
+    build:
+      context: .
+      dockerfile: layoutlmv3/Dockerfile
+    entrypoint: [ "sleep", "infinity" ]
+    volumes:
+      - ./layoutlmv3:/layoutlmv3
+      - ./datasets:/datasets
+    environment:
+      - WANDB_API_KEY=${WANDB_API_KEY}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["1"]
+              capabilities: [gpu]
+  huggingface:
+    build:
+      context: .
+      dockerfile: huggingface_token_classification/Dockerfile
+    entrypoint: [ "sleep", "infinity" ]
+    volumes:
+      - ./huggingface_token_classification:/scripts
+      - ./datasets:/datasets
+    environment:
+      - WANDB_API_KEY=${WANDB_API_KEY}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["1"]
+              capabilities: [gpu]
+  finetune:
+    build:
+      context: .
+      dockerfile: finetune/Dockerfile
+    entrypoint: [ "sleep", "infinity" ]
+    volumes:
+      - ./finetune:/finetune
+      - ./datasets:/datasets
+    environment:
+      - WANDB_API_KEY=${WANDB_API_KEY}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: ["1"]
+              capabilities: [gpu]
+

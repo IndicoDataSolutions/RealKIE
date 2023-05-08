@@ -1,0 +1,8 @@
+datasets
+evaluate
+tokenizers
+transformers
+sentencepiece
+fire
+seqeval
+wandb
