@@ -358,7 +358,7 @@ def setup_and_run_sweep(
     
     sweep_configs = {
         "method": "bayes",
-        "metric": {"name": "val_macro_f1", "goal": "minimize"},
+        "metric": {"name": "val_macro_f1", "goal": "maximize"},
         "parameters": {
             # Add these values in here to make resuming easier.
             **sweep_id_config,
