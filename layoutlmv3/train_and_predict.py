@@ -540,7 +540,21 @@ def run_agent(sweep_id, entity, project):
             print(traceback.format_exc())
             raise
 
-    wandb.agent(sweep_id=sweep_id, function=train_model, entity=entity, project=project)
+    _run_agent(sweep_id=sweep_id, function=train_model, entity=entity, project=project)
+
+
+def get_num_runs(sweep_id, entity, project):
+    sweep = wandb.Api().sweep(f"{entity}/{project}/{sweep_id}")
+    num_runs = len([None for r in sweep.runs if r.state in {"finished", "running"}])
+    print(f"Current number of runs {num_runs}")
+    return num_runs
+
+
+def _run_agent(sweep_id, function, entity, project):
+    while get_num_runs(sweep_id=sweep_id, entity=entity, project=project) <= 100:
+        wandb.agent(sweep_id=sweep_id, function=function, entity=entity, project=project, count=1)
+    print("This sweep is complete - exiting")
+    exit(0)
 
 
 def get_matching_sweep(project, entity, sweep_id_config):
@@ -568,7 +582,7 @@ def setup_and_run_sweep(
     sweep_id = get_matching_sweep(project, entity, sweep_id_config)
     if sweep_id is not None:
         print(f"Resuming Sweep with ID: {sweep_id}")
-        run_agent(sweep_id, entity=entity, project=project)
+        return run_agent(sweep_id, entity=entity, project=project)
 
     sweep_configs = {
         "method": "bayes",
@@ -624,7 +638,7 @@ def setup_and_run_sweep(
     }
     sweep_id = wandb.sweep(sweep_configs, project=project, entity=entity)
     print(f"Your sweep id is {sweep_id}")
-    run_agent(sweep_id, entity=entity, project=project)
+    return run_agent(sweep_id, entity=entity, project=project)
 
 
 if __name__ == "__main__":
