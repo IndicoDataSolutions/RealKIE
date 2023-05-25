@@ -110,6 +110,9 @@ def train_and_predict(
     num_labels = len(label_list)
 
     tokenizer = AutoTokenizer.from_pretrained(base_model)
+    if "deberta" in base_model:
+        # Deberta max length defaults to 1e32
+        tokenizer.model_max_length = 512
     model = AutoModelForTokenClassification.from_pretrained(
         base_model, num_labels=num_labels, id2label=id_to_label, label2id=label_to_id
     )
