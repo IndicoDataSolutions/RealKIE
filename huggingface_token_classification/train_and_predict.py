@@ -189,7 +189,8 @@ def train_and_predict(
             labels.append(label_ids)
         for doc_labels in examples["labels"]:
             for l in doc_labels:
-                assert l.get("matched", False)
+                if not l.get("matched", False):
+                    print(f"Unmatched Label {l}")
         tokenized_inputs["labels"] = labels
         tokenized_inputs["doc_path"] = doc_paths
         tokenized_inputs["token_offsets"] = token_offsets
@@ -387,7 +388,10 @@ def setup_and_run_sweep(
             "per_device_train_batch_size": {
                 "distribution": "int_uniform",
                 "min": 1,
-                "max": 8,
+                "max": 4,
+            },
+            "per_device_eval_batch_size": {
+                "value": 2,
             },
             "gradient_accumulation_steps": {
                 "distribution": "int_uniform",

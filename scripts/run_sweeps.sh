@@ -65,12 +65,14 @@ run_on_all_gpus() {
 
 for dataset in charities nda resource_contracts s1
 do
-    for finetune_base_model in xdoc roberta-base roberta-large
+    for finetune_base_model in xdoc roberta-base 
+    # roberta-large
     do
         run_on_all_gpus finetune python3 train_and_predict.py wandb_sweep $PROJECT $ENTITY $dataset $finetune_base_model
     done
     # Longformer low priority
-    for hf_base_model in deberta-v3-base deberta-v3-large roberta-base roberta-large longformer-base-4096
+    for hf_base_model in roberta-base microsoft/deberta-v3-base allenai/longformer-base-4096
+    # deberta-v3-large roberta-large
     do
         run_on_all_gpus huggingface python3 train_and_predict.py wandb_sweep $PROJECT $ENTITY $dataset $hf_base_model
     done

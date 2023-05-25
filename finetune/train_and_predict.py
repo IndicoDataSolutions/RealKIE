@@ -8,6 +8,8 @@ import fire
 import pandas as pd
 import wandb
 
+import tensorflow as tf
+
 from finetune import DocumentLabeler, SequenceLabeler
 from finetune.base_models import (
     BERTLarge,
@@ -141,6 +143,8 @@ def run_agent(sweep_id, entity, project):
             # Seems like this method of running with wandb swallows the tracebacks.
             print(traceback.format_exc())
             raise
+        finally:
+            tf.compat.v1.reset_default_graph()
 
     _run_agent(sweep_id=sweep_id, function=train_model, entity=entity, project=project)
 
