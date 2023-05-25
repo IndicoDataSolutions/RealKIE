@@ -4,7 +4,7 @@ import fire
 import os
 import tqdm
 import glob
-from collections import defaultdict
+from collections import defaultdict, Counter
 
 def get_all_data(dataset_dir, dataset_name):
     df = pd.DataFrame()
@@ -177,6 +177,12 @@ def remove_leading_path_names(dataset_name, dataset_dir="datasets"):
             new_records.append(row)
         pd.DataFrame.from_records(new_records).to_csv(split_path)
 
+def get_qa_dataset_info_table(dataset_dir="datasets"):
+    files = glob.glob(os.path.join(dataset_dir, "*/qa.csv"))
+    
+    for f in files:
+        df = pd.read_csv(f)
+        print(f, Counter(df.error_type))
 
 if __name__ == "__main__":
     fire.Fire(
@@ -187,5 +193,6 @@ if __name__ == "__main__":
             "cleanup_files": cleanup_files,
             "deduplicate": deduplicate,
             "remove_leading_path_names": remove_leading_path_names,
+            "get_qa_dataset_info_table": get_qa_dataset_info_table,
         }
     )
