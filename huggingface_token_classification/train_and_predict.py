@@ -233,6 +233,7 @@ def train_and_predict(
             per_device_train_batch_size=per_device_train_batch_size,
             output_dir=output_dir,
             num_train_epochs=num_train_epochs,
+            save_total_limit=1,
             gradient_accumulation_steps=gradient_accumulation_steps,
             **training_args,
         ),
