@@ -49,7 +49,7 @@ steps:
     commands:
       - echo https://dl-cdn.alpinelinux.org/alpine/edge/community >> /etc/apk/repositories
       - apk update
-      - apk add yq jq bash curl wget parallel
+      - apk add yq jq bash curl wget
       - wget -c https://github.com/shteou/helm-dependency-fetch/releases/download/v1.1.3/helm-dependency-fetch_1.1.3_Linux_x86_64.tar.gz -O - | tar -xz
       - export PATH=$${CWD}:$${PATH}
       - helm version
