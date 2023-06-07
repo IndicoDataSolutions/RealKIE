@@ -1,24 +1,32 @@
-import glob
 import json
 import os
+import hashlib
 import traceback
-import uuid
+import time
 
 import fire
 import pandas as pd
 from indico import IndicoClient, IndicoConfig
 from indico.client import GraphQLRequest, RequestChain, Debouncer
-from indico.errors import IndicoError
 from indico.queries import (
-    CreateExport,
     GetExport,
     DownloadExport,
     GetDataset,
     RetrieveStorageObject,
 )
 from sklearn.model_selection import train_test_split
+import gzip
+import tqdm
 
-
+class ClientWithSlowRetry(IndicoClient):
+    def call(self, *args, **kwargs):
+        try:
+            return super().call(*args, **kwargs)
+        except TypeError:
+            print("Retrying the following exception")
+            print(traceback.format_exc())
+            time.sleep(60)
+            return self.call(*args, **kwargs)
 
 class GraphQLMagic(GraphQLRequest):
     def __init__(self, *args, **kwargs):
@@ -123,6 +131,14 @@ def get_ocr_by_datafile_id(client, datafile_id):
         page_images.append(page_image)
     return page_ocrs, page_images
 
+def get_same_splits(dataset_dir, split_file, records):
+    filenames = set(pd.read_csv(os.path.join(dataset_dir, "old_split_files", split_file)).original_filename)
+    return [r for r in records if r["original_filename"] in filenames]
+
+def cleanup_path(path):
+    if path.startswith("datasets/"):
+        path = path[len("datasets/"): ]
+    return path
 
 def get_dataset(
     name,
@@ -132,20 +148,34 @@ def get_dataset(
     text_col="text",
     host="app.indico.io",
     api_token_path="/home/m/api_keys/prod_api_token.txt",
+    update=False,
 ):
-    print(name)
     dataset_dir = os.path.join("datasets", name)
     if not os.path.exists(dataset_dir):
         os.mkdir(dataset_dir)
         os.mkdir(os.path.join(dataset_dir, "images"))
         os.mkdir(os.path.join(dataset_dir, "files"))
+        os.mkdir(os.path.join(dataset_dir, "ocr"))
 
-    if os.path.exists(os.path.join(dataset_dir, "val.csv")):
-        print("This dataset has already been downloaded.")
-        exit()
+
+    if os.path.exists(os.path.join(dataset_dir, "val.csv")) or os.path.exists(os.path.join(dataset_dir, "old_split_files")):
+        if not update:
+            print("This dataset has already been downloaded.")
+            exit()
+            
+        else:
+            if not os.path.exists(os.path.join(dataset_dir, "old_split_files")):
+                os.mkdir(os.path.join(dataset_dir, "old_split_files"))
+            for f in ["val.csv", "train.csv", "test.csv", "raw_export.csv"]:
+                if os.path.exists(os.path.join(dataset_dir, f)):
+                    os.rename(os.path.join(dataset_dir, f), os.path.join(dataset_dir, "old_split_files", f))
+    else:
+        if update:
+            print("You cannot update a dataset that does not exist")
+            exit()
 
     my_config = IndicoConfig(host=host, api_token_path=api_token_path)
-    client = IndicoClient(config=my_config)
+    client = ClientWithSlowRetry(config=my_config)
 
     export_path = os.path.join(dataset_dir, "raw_export.csv")
 
@@ -164,41 +194,59 @@ def get_dataset(
     records = raw_export.to_dict("records")
     output_records = []
 
-    for i, row in enumerate(records):
+    for i, row in tqdm.tqdm(enumerate(records)):
         if pd.isna(row[label_col]):
             print("No labels - skipping")
             continue
-        filename = str(uuid.uuid4())
+        filename = str(hashlib.md5(f"{row['file_id']} {row['file_name']}".encode('utf-8')).hexdigest())
         file_dir = os.path.join(dataset_dir, "images", filename)
         os.makedirs(file_dir, exist_ok=True)
         local_page_pattern = os.path.join(file_dir, "page_{}.png")
-        page_ocrs, page_images = get_ocr_by_datafile_id(client, row["file_id"])
-        output_record = {
-            "ocr": json.dumps(page_ocrs),
-            "text": row[text_col],
-            "labels": reformat_labels(row[label_col], row[text_col]),
-        }
+        datafile_meta = client.call(GetDatafileByID(datafileId=row["file_id"]))
         image_files = []
-        for (page_ocr, page_image) in zip(page_ocrs, page_images):
-            local_page_image = local_page_pattern.format(
-                page_ocr["pages"][0]["page_num"]
-            )
-            image_files.append(local_page_image)
-            with open(local_page_image, "wb") as fp:
-                fp.write(page_image)
-        output_record["image_files"] = json.dumps(image_files)
+        page_ocrs = []
+
+        ocr_path = os.path.join(
+            dataset_dir, "ocr", filename + "." + "json.gz"
+        )
+        if not os.path.exists(ocr_path):
+            for page in datafile_meta["datafile"]["pages"]:
+                if not os.path.exists(ocr_path):
+                    page_ocr = client.call(RetrieveStorageObject(page["pageInfo"]))
+                    page_ocrs.append(page_ocr)
+            with gzip.open(ocr_path, 'wt') as fp:
+                fp.write(json.dumps(page_ocrs)) 
+
+        for i, page in enumerate(datafile_meta["datafile"]["pages"]):
+            local_page_image = local_page_pattern.format(i)
+            image_files.append(cleanup_path(local_page_image))
+            if not os.path.exists(local_page_image):
+                page_image = client.call(RetrieveStorageObject(page["image"]))
+                with open(local_page_image, "wb") as fp:
+                    fp.write(page_image)
+
         document_path = os.path.join(
             dataset_dir, "files", filename + "." + row["file_name"].split(".")[-1]
         )
-        output_record["document_path"] = document_path
-        with open(document_path, "wb") as fp:
-            fp.write(client.call(RetrieveStorageObject(row["file_url"])))
+        output_record = {
+            "original_filename": row["file_name"],
+            "ocr": cleanup_path(ocr_path),
+            "text": row[text_col],
+            "labels": reformat_labels(row[label_col], row[text_col]),
+            "image_files": json.dumps(image_files),
+            "document_path": cleanup_path(document_path)
+        }
+        if not os.path.exists(document_path):
+            with open(document_path, "wb") as fp:
+                fp.write(client.call(RetrieveStorageObject(row["file_url"])))
         output_records.append(output_record)
-        exit()
-
-    # TODO: consider removing train test split logic
-    train_records, test_val_records = train_test_split(output_records, test_size=0.4)
-    test_records, val_records = train_test_split(test_val_records, test_size=0.5)
+    if update:
+        val_records = get_same_splits(dataset_dir, "val.csv", output_records)
+        train_records = get_same_splits(dataset_dir, "train.csv", output_records)
+        test_records = get_same_splits(dataset_dir, "test.csv", output_records)
+    else:
+        train_records, test_val_records = train_test_split(output_records, test_size=0.4)
+        test_records, val_records = train_test_split(test_val_records, test_size=0.5)
     for split, records in [
         ("train", train_records),
         ("test", test_records),

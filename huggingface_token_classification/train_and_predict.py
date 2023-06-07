@@ -110,6 +110,9 @@ def train_and_predict(
     num_labels = len(label_list)
 
     tokenizer = AutoTokenizer.from_pretrained(base_model)
+    if "deberta" in base_model:
+        # Deberta max length defaults to 1e32
+        tokenizer.model_max_length = 512
     model = AutoModelForTokenClassification.from_pretrained(
         base_model, num_labels=num_labels, id2label=id_to_label, label2id=label_to_id
     )
@@ -189,7 +192,8 @@ def train_and_predict(
             labels.append(label_ids)
         for doc_labels in examples["labels"]:
             for l in doc_labels:
-                assert l.get("matched", False)
+                if not l.get("matched", False):
+                    print(f"Unmatched Label {l}")
         tokenized_inputs["labels"] = labels
         tokenized_inputs["doc_path"] = doc_paths
         tokenized_inputs["token_offsets"] = token_offsets
@@ -229,6 +233,7 @@ def train_and_predict(
             per_device_train_batch_size=per_device_train_batch_size,
             output_dir=output_dir,
             num_train_epochs=num_train_epochs,
+            save_total_limit=1,
             gradient_accumulation_steps=gradient_accumulation_steps,
             **training_args,
         ),
@@ -311,7 +316,7 @@ def get_sweep_config():
     return config
 
 
-def run_agent(sweep_id):
+def run_agent(sweep_id, entity, project):
     def train_model():
         try:
             wandb.init(save_code=True)
@@ -327,32 +332,70 @@ def run_agent(sweep_id):
             print(traceback.format_exc())
             raise
 
-    wandb.agent(sweep_id=sweep_id, function=train_model)
+    _run_agent(sweep_id=sweep_id, function=train_model, entity=entity, project=project)
+
+
+def get_num_runs(sweep_id, entity, project):
+    sweep = wandb.Api().sweep(f"{entity}/{project}/{sweep_id}")
+    num_runs = len([None for r in sweep.runs if r.state in {"finished", "running"}])
+    print(f"Current number of runs {num_runs}")
+    return num_runs
+
+
+def _run_agent(sweep_id, function, entity, project):
+    while get_num_runs(sweep_id=sweep_id, entity=entity, project=project) <= 100:
+        wandb.agent(sweep_id=sweep_id, function=function, entity=entity, project=project, count=1)
+    print("This sweep is complete - exiting")
+    exit(0)
+
+
+def get_matching_sweep(project, entity, sweep_id_config):
+    project = wandb.Api().project(project, entity=entity)
+    try:
+        sweeps = project.sweeps()
+    except wandb.errors.CommError:
+        return None
+    for s in sweeps:
+        sweep_config = s.config["parameters"]
+        if sweep_id_config.items() <= sweep_config.items():
+            return s.id
+    return None
 
 
 def setup_and_run_sweep(
     project, entity, dataset_name, base_model, dataset_dir="/datasets",
 ):
+    sweep_id_config = {
+        "dataset_name": {"value": dataset_name},
+        "dataset_dir": {"value": dataset_dir},
+        "base_model": {"value": base_model},
+        "training_lib": {"value": TRAINING_LIB},
+    }
+    sweep_id = get_matching_sweep(project, entity, sweep_id_config)
+    if sweep_id is not None:
+        print(f"Resuming Sweep with ID: {sweep_id}")
+        return run_agent(sweep_id, entity=entity, project=project)
+    
     sweep_configs = {
         "method": "bayes",
-        "metric": {"name": "val_macro_f1", "goal": "minimize"},
+        "metric": {"name": "val_macro_f1", "goal": "maximize"},
         "parameters": {
             # Add these values in here to make resuming easier.
-            "dataset_name": {"value": dataset_name},
-            "dataset_dir": {"value": dataset_dir},
-            "base_model": {"value": base_model},
-            "training_lib": {"value": TRAINING_LIB},
+            **sweep_id_config,
             # Sweep Params
             "empty_chunk_ratio": {
                 "distribution": "log_uniform_values",
                 "min": 1e-2,
                 "max": 1000.0,
             },
-            "num_train_epochs": {"distribution": "int_uniform", "min": 1, "max": 128},
+            "num_train_epochs": {"distribution": "int_uniform", "min": 1, "max": 16},
             "per_device_train_batch_size": {
                 "distribution": "int_uniform",
                 "min": 1,
-                "max": 8,
+                "max": 4,
+            },
+            "per_device_eval_batch_size": {
+                "value": 2,
             },
             "gradient_accumulation_steps": {
                 "distribution": "int_uniform",
@@ -390,7 +433,7 @@ def setup_and_run_sweep(
     }
     sweep_id = wandb.sweep(sweep_configs, project=project, entity=entity)
     print(f"Your sweep id is {sweep_id}")
-    run_agent(sweep_id)
+    return run_agent(sweep_id, entity=entity, project=project)
 
 
 if __name__ == "__main__":
