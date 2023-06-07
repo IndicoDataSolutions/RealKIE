@@ -2,6 +2,8 @@
 PROJECT=dataset-paper-sweeps-k8s-test
 ENTITY=indico
 
+./get_data.sh
+
 for dataset in nda
 do
     for finetune_base_model in xdoc roberta-base

@@ -8,4 +8,5 @@ ADD finetune/requirements.txt .
 RUN pip3 install -r requirements.txt
 ADD metrics /metrics
 RUN cd /metrics && pip3 install .
+ADD scripts/get_data.sh .
 WORKDIR /finetune
