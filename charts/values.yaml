@@ -1,0 +1,33 @@
+appName: project-fruitfly
+defaultNamespace: "default"
+
+imagePullSecret: harbor-pull-secret
+
+storage:
+  pvcName: read-write
+
+wandbApiKey: ""
+
+sweeps:
+  finetune:
+    replicas: 1
+    command: '["bash", "run_sweep.sh"]'
+    tolerations:
+      - effect: NoSchedule
+        key: nvidia.com/gpu
+        operator: Exists
+    resources:
+      limits:
+        cpu: 2
+        memory: 12Gi
+        nvidia.com/gpu: 1
+      requests:
+        cpu: 2
+        memory: 12Gi
+        nvidia.com/gpu: 1
+    env: {}
+    image:
+      repository: harbor.devops.indico.io/indico
+      name: project_fruitfly_finetune
+      # -- Filled in by the update_image_tags.sh script
+      tag: <placeholder>

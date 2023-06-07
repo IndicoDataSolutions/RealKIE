@@ -1,0 +1,51 @@
+{{- $appName := .Values.appName }}
+{{- $imagePullSecret := .Values.imagePullSecret }}
+{{- $storage := .Values.storage }}
+{{- $wandbApiKey := .Values.wandbApiKey }}
+
+{{- range $sweepName, $values := .Values.sweeps }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $appName }}-{{ $sweepName }}
+  namespace: {{ $.Release.Namespace }}
+  labels:
+    app: {{ $appName }}-{{ $sweepName }}
+    inditype: service
+spec:
+  replicas: {{ $values.replicas }}
+  selector:
+    matchLabels:
+      app: {{ $appName }}-{{ $sweepName }}
+  template:
+    metadata:
+      labels:
+        app: {{ $appName }}-{{ $sweepName }}
+    spec:
+      {{- with $values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      imagePullSecrets:
+        - name: {{ $imagePullSecret }}
+      containers:
+        - name: {{ $appName }}-{{ $sweepName }}
+          image: {{ $values.image.repository }}/{{ $values.image.name }}:{{ $values.image.tag }}
+          env:
+          - name: WANDB_API_KEY
+            value: {{ $wandbApiKey }}
+          {{- range $key, $val := $values.env }}
+          - name: {{ $key }}
+            value: {{ $val | quote }}
+          {{- end }}
+          resources:
+{{ $values.resources | toYaml | trim | indent 12 }}
+          volumeMounts:
+            - mountPath: /datasets
+              name: data
+              subPath: /fruitfly-datasets
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ $storage.pvcName }}
+{{- end }}
