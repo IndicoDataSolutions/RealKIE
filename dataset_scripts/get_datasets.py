@@ -135,6 +135,11 @@ def get_same_splits(dataset_dir, split_file, records):
     filenames = set(pd.read_csv(os.path.join(dataset_dir, "old_split_files", split_file)).original_filename)
     return [r for r in records if r["original_filename"] in filenames]
 
+def cleanup_path(path):
+    if path.startswith("datasets/"):
+        path = path[len("datasets/"): ]
+    return path
+
 def get_dataset(
     name,
     dataset_id,
@@ -214,7 +219,7 @@ def get_dataset(
 
         for i, page in enumerate(datafile_meta["datafile"]["pages"]):
             local_page_image = local_page_pattern.format(i)
-            image_files.append(local_page_image)
+            image_files.append(cleanup_path(local_page_image))
             if not os.path.exists(local_page_image):
                 page_image = client.call(RetrieveStorageObject(page["image"]))
                 with open(local_page_image, "wb") as fp:
@@ -225,11 +230,11 @@ def get_dataset(
         )
         output_record = {
             "original_filename": row["file_name"],
-            "ocr": ocr_path,
+            "ocr": cleanup_path(ocr_path),
             "text": row[text_col],
             "labels": reformat_labels(row[label_col], row[text_col]),
             "image_files": json.dumps(image_files),
-            "document_path": document_path
+            "document_path": cleanup_path(document_path)
         }
         if not os.path.exists(document_path):
             with open(document_path, "wb") as fp:

@@ -20,8 +20,8 @@ def get_qa_data(dataset_dir, dataset_name):
         df = pd.concat([df, split_df])
     return df[["text", "labels", "document_path", "split", "ocr", "original_filename"]]
 
-def get_ocr(ocr_file):
-    with gzip.open(ocr_file, 'rt') as fp:
+def get_ocr(ocr_file, dataset_dir):
+    with gzip.open(os.path.join(dataset_dir, ocr_file), 'rt') as fp:
         return json.loads(fp.read())
 
 def main(dataset_name, dataset_dir="datasets"):
@@ -37,7 +37,7 @@ def main(dataset_name, dataset_dir="datasets"):
     qa_df_records = []
     for p, row in zip(preds, df.to_dict("records")):
         page_boundaries = []
-        for r in get_ocr(row["ocr"]):
+        for r in get_ocr(row["ocr"], dataset_dir):
             page_boundaries.append(
                 {**r["pages"][0]["doc_offset"], "page_num": r["pages"][0]["page_num"],}
             )
