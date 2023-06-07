@@ -36,7 +36,8 @@ from transformers import (
 )
 from transformers.utils import check_min_version
 
-from datasets import Dataset, load_metric
+from datasets import Dataset, load_metric, disable_caching
+disable_caching()
 from metrics import metrics
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
@@ -92,7 +93,6 @@ def get_dataset(dataset_name, split, dataset_dir):
     data = []
     for row in csv.to_dict("records"):
         labels = json.loads(row["labels"])
-        ocr = json.loads()
         with gzip.open(os.path.join(dataset_dir, row["ocr"]), 'rt') as fp:
             ocr = json.loads(fp.read())
         images = json.loads(row["image_files"])
@@ -318,7 +318,12 @@ def train_and_predict(
                     tol = 0
                     positions = []
                     while not positions:
-                        if tol > 2:  # Tol of 2 is used commonly for whitespace tokens
+                        t_start = max(0, token_doc_offset["start"] - tol)
+                        t_end = token_doc_offset["end"] + tol
+                        do = examples["page_offset"][org_batch_index]
+                        t_text = examples["text"][org_batch_index][t_start - do: t_end - do]
+                        examples["text"]
+                        if tol > 2 and len(t_text.replace(" ", "").replace("\n", "")) > 2:  # Tol of 2 is used commonly for whitespace tokens          
                             print(
                                 "Token did not match a position - using the previous token instead. Tol = {}".format(
                                     tol
@@ -330,8 +335,9 @@ def train_and_predict(
                             if overlaps(
                                 t["doc_offset"],
                                 {
-                                    "start": token_doc_offset["start"] - tol,
-                                    "end": token_doc_offset["end"],
+                                    "start": t_start,
+                                    "end": t_end,
+
                                 },
                             )
                         ]
@@ -438,6 +444,7 @@ def train_and_predict(
             per_device_train_batch_size=per_device_train_batch_size,
             output_dir=output_dir,
             num_train_epochs=num_train_epochs,
+            save_total_limit=1,
             gradient_accumulation_steps=gradient_accumulation_steps,
             **training_args,
         ),
