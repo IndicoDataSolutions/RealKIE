@@ -17,9 +17,11 @@ sweeps:
         key: nvidia.com/gpu
         operator: Exists
     resources:
+      limits:
+        nvidia.com/gpu: 1
       requests:
         cpu: 1
-        memory: 1Gi
+        memory: 2Gi
         nvidia.com/gpu: 1
     env: {}
     image:
