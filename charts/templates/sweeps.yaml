@@ -43,7 +43,7 @@ spec:
           volumeMounts:
             - mountPath: /datasets
               name: data
-              subPath: /fruitfly-datasets
+              subPath: fruitfly-datasets
       volumes:
         - name: data
           persistentVolumeClaim:

@@ -113,13 +113,15 @@ def get_dataset(dataset_name, split, dataset_dir):
             data.append(item)
     return data
 
+def clip_position(pos):
+    return min(max(int(pos), 0), 1000)
 
 def get_layoutlm_position(position, page_size):
     return [
-        int(1000 * position["left"] / page_size["width"]),
-        int(1000 * position["top"] / page_size["height"]),
-        int(1000 * position["right"] / page_size["width"]),
-        int(1000 * position["bottom"] / page_size["height"]),
+        clip_position(1000 * position["left"] / page_size["width"]),
+        clip_position(1000 * position["top"] / page_size["height"]),
+        clip_position(1000 * position["right"] / page_size["width"]),
+        clip_position(1000 * position["bottom"] / page_size["height"]),
     ]
 
 
