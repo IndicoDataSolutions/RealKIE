@@ -24,6 +24,7 @@ sweeps:
         memory: 2Gi
         nvidia.com/gpu: 1
     env: {}
+    priorityClassName: indico-gpu-critical
     image:
       repository: harbor.devops.indico.io/indico
       name: project_fruitfly_finetune
