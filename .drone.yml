@@ -10,7 +10,7 @@ image_pull_secrets:
   - DOCKER_CONFIG_JSON
 
 steps:
-  - name: build-api
+  - name: build-finetune
     image: harbor.devops.indico.io/indico/drone-builder
     settings:
       username:
@@ -25,6 +25,42 @@ steps:
       experimental: true
       context: .
       dockerfile: finetune/Dockerfile
+    environment:
+      DOCKER_BUILDKIT: 1
+      POETRY_INSTALL_ARGS: ""
+ - name: build-layoutlm
+    image: harbor.devops.indico.io/indico/drone-builder
+    settings:
+      username:
+        from_secret: harbor_username
+      password:
+        from_secret: harbor_password
+      registry: harbor.devops.indico.io
+      repo: harbor.devops.indico.io/indico/project_fruitfly_layoutlm
+      tags:
+        - ${DRONE_SOURCE_BRANCH/\//-}.${DRONE_COMMIT_SHA}
+      squash: true
+      experimental: true
+      context: .
+      dockerfile: layoutlmv3/Dockerfile
+    environment:
+      DOCKER_BUILDKIT: 1
+      POETRY_INSTALL_ARGS: ""
+ - name: build-huggingface
+    image: harbor.devops.indico.io/indico/drone-builder
+    settings:
+      username:
+        from_secret: harbor_username
+      password:
+        from_secret: harbor_password
+      registry: harbor.devops.indico.io
+      repo: harbor.devops.indico.io/indico/project_fruitfly_huggingface
+      tags:
+        - ${DRONE_SOURCE_BRANCH/\//-}.${DRONE_COMMIT_SHA}
+      squash: true
+      experimental: true
+      context: .
+      dockerfile: huggingface_token_classification/Dockerfile
     environment:
       DOCKER_BUILDKIT: 1
       POETRY_INSTALL_ARGS: ""

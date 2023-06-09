@@ -20,3 +20,5 @@ ADD huggingface_token_classification/requirements.txt /scripts
 ADD metrics /metrics
 RUN cd /metrics && pip3 install .
 RUN pip3 install -r /scripts/requirements.txt
+ADD huggingface_token_classification /scripts
+ADD scripts/get_data.sh .

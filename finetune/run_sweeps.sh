@@ -1,7 +1,4 @@
 #!/bin/bash
-PROJECT=dataset-paper-sweeps-k8s-test
-ENTITY=indico
-
 ./get_data.sh
 
 for dataset in nda

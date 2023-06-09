@@ -1,7 +1,7 @@
 {{- $appName := .Values.appName }}
 {{- $imagePullSecret := .Values.imagePullSecret }}
 {{- $storage := .Values.storage }}
-{{- $wandbApiKey := .Values.wandbApiKey }}
+{{- $sweepSetup := .Values.sweepSetup }}
 
 {{- range $sweepName, $values := .Values.sweeps }}
 apiVersion: apps/v1
@@ -34,7 +34,11 @@ spec:
           command: {{ $values.command }}
           env:
           - name: WANDB_API_KEY
-            value: {{ $wandbApiKey }}
+            value: {{ $sweepSetup.wandbApiKey }}
+          - name: PROJECT
+            value: {{ $sweepSetup.wandbProject }}
+          - name: ENTITY
+            value: {{ $sweepSetup.wandbEntity }}
           {{- range $key, $val := $values.env }}
           - name: {{ $key }}
             value: {{ $val | quote }}

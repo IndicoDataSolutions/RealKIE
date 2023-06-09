@@ -25,3 +25,5 @@ RUN pip3 install -r requirements.txt
 ADD metrics /metrics
 RUN cd /metrics && pip3 install .
 RUN cd /unilm/layoutlmv3 && pip3 install -e .
+ADD layoutlmv3 /layoutlmv3
+ADD scripts/get_data.sh /layoutlmv3
