@@ -4,6 +4,7 @@
 {{- $sweepSetup := .Values.sweepSetup }}
 
 {{- range $sweepName, $values := .Values.sweeps }}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
