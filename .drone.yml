@@ -28,7 +28,7 @@ steps:
     environment:
       DOCKER_BUILDKIT: 1
       POETRY_INSTALL_ARGS: ""
- - name: build-layoutlm
+  - name: build-layoutlm
     image: harbor.devops.indico.io/indico/drone-builder
     settings:
       username:
@@ -46,7 +46,7 @@ steps:
     environment:
       DOCKER_BUILDKIT: 1
       POETRY_INSTALL_ARGS: ""
- - name: build-huggingface
+  - name: build-huggingface
     image: harbor.devops.indico.io/indico/drone-builder
     settings:
       username:
@@ -73,7 +73,7 @@ depends-on:
   - build-images
 
 concurrency:
-  limit: 1 # allow 1 at most (dont over load chartmuseum)
+  limit: 1  # allow 1 at most (dont over load chartmuseum)
 
 trigger:
   event:
