@@ -28,13 +28,30 @@ def get_dataset_path(dataset_name, dataset_dir, split):
     return os.path.join(dataset_dir, dataset_name, f"{split}.csv")
 
 
+def strip_unused_ocr_data(ocr_data: dict):
+    ocr_data.pop("chars", None)
+    ocr_data.pop("blocks", None)
+    for token in ocr_data["tokens"]:
+        token.pop("style", None)
+        token.pop("page_offset", None)
+        token.pop("block_offset", None)
+        token.pop("page_num", None)
+    for page in ocr_data["pages"]:
+        page.pop("image", None)
+        page.pop("thumbnail", None)
+        page.pop("ocr_statistics", None)
+        page.pop("page_num", None)
+    return ocr_data
+
+
 def get_model_input_from_csv(csv, is_document, dataset_dir):
     if is_document:
         ocr = []
         for ocr_file, text in zip(csv.ocr, csv.text):
             ocr_file = os.path.join(dataset_dir, ocr_file)
             with gzip.open(ocr_file, 'rt') as fp:
-                ocr.append(json.loads(fp.read()))
+                doc_ocr = json.loads(fp.read())
+                ocr.append([strip_unused_ocr_data(ocr_page) for ocr_page in doc_ocr])
             assert "\n".join(page["pages"][0]["text"] for page in ocr[-1]) == text
         return ocr
     return csv.text
@@ -150,6 +167,9 @@ def run_agent(sweep_id, entity, project):
 
 def get_num_runs(sweep_id, entity, project):
     sweep = wandb.Api().sweep(f"{entity}/{project}/{sweep_id}")
+    if sweep.state != "RUNNING":
+        print("This sweep is currently {}".format(sweep.state))
+        exit(0)
     num_runs = len([None for r in sweep.runs if r.state in {"finished", "running"}])
     print(f"Current number of runs {num_runs}")
     return num_runs
