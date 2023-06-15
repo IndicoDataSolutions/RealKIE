@@ -43,6 +43,21 @@ def strip_unused_ocr_data(ocr_data: dict):
         page.pop("page_num", None)
     return ocr_data
 
+def fix_page_offsets(doc_ocr):
+    # This doesn't actually change the data in any important way,
+    # but just stops us hitting assertion errors in finetune
+    # Error comes from long strings of empty pages in resource contracts.
+    consecutive = 0
+    for i, page in enumerate(doc_ocr):
+        if i >= 0:
+            page_do = page["pages"][0]["doc_offset"]
+            if page_do["start"] == page_do["end"]:
+                consecutive += 1
+                page_do["start"] += consecutive
+                page_do["end"] += consecutive
+            else:
+                consecutive = 0
+    return doc_ocr
 
 def get_model_input_from_csv(csv, is_document, dataset_dir):
     if is_document:
@@ -51,7 +66,8 @@ def get_model_input_from_csv(csv, is_document, dataset_dir):
             ocr_file = os.path.join(dataset_dir, ocr_file)
             with gzip.open(ocr_file, 'rt') as fp:
                 doc_ocr = json.loads(fp.read())
-                ocr.append([strip_unused_ocr_data(ocr_page) for ocr_page in doc_ocr])
+                doc_ocr = fix_page_offsets([strip_unused_ocr_data(ocr_page) for ocr_page in doc_ocr])
+                ocr.append(doc_ocr)
             assert "\n".join(page["pages"][0]["text"] for page in ocr[-1]) == text
         return ocr
     return csv.text
