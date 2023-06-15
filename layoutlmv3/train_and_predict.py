@@ -28,7 +28,6 @@ from timm.data.constants import (
 )
 from torchvision import transforms
 from transformers import (
-    AutoConfig,
     AutoModelForTokenClassification,
     AutoTokenizer,
     Trainer,
@@ -165,17 +164,11 @@ def train_and_predict(
     dataset_dir="/datasets",
     empty_chunk_ratio=2.0,
     per_device_train_batch_size=2,
-    gradient_accumulation_steps=1,  # Previously 4
+    gradient_accumulation_steps=1,
     num_train_epochs=16,
     fp16=True,
     model_name_or_path="microsoft/layoutlmv3-base",
-    config_name=None,
-    tokenizer_name=None,
-    task_name="ner",
-    cache_dir=None,
-    model_revision="main",
     input_size=224,
-    use_auth_token=False,
     visual_embed=True,
     imagenet_default_mean_and_std=False,
     train_interpolation="bicubic",
@@ -197,33 +190,15 @@ def train_and_predict(
         )
     )
     label_to_id = {l: i for i, l in enumerate(label_list)}
+    id_to_label = {i: l for i, l in enumerate(label_list)}
     num_labels = len(label_list)
 
-    config = AutoConfig.from_pretrained(
-        config_name if config_name else model_name_or_path,
-        num_labels=num_labels,
-        finetuning_task=task_name,
-        cache_dir=cache_dir,
-        revision=model_revision,
-        input_size=input_size,
-        use_auth_token=use_auth_token,
-    )
-    tokenizer = AutoTokenizer.from_pretrained(
-        tokenizer_name if tokenizer_name else model_name_or_path,
-        tokenizer_file=None,  # avoid loading from a cached file of the pre-trained model in another machine
-        cache_dir=cache_dir,
-        use_fast=True,
-        add_prefix_space=True,
-        revision=model_revision,
-        use_auth_token=use_auth_token,
-    )
+    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True,)
     model = AutoModelForTokenClassification.from_pretrained(
         model_name_or_path,
-        from_tf=bool(".ckpt" in model_name_or_path),
-        config=config,
-        cache_dir=cache_dir,
-        revision=model_revision,
-        use_auth_token=use_auth_token,
+        num_labels=num_labels,
+        id2label=id_to_label,
+        label2id=label_to_id,
     )
 
     # Preprocessing the dataset
@@ -273,7 +248,6 @@ def train_and_predict(
         images = []
         doc_paths = []
         token_offsets = []
-        orig_labels = []
         for batch_index in range(len(tokenized_inputs["input_ids"])):
             word_ids = tokenized_inputs.word_ids(batch_index=batch_index)
             offsets = tokenized_inputs.offset_mapping[batch_index]
@@ -282,7 +256,6 @@ def train_and_predict(
             ]
             label_ids = []
             bbox_inputs = []
-            orig_labels_i = []
             doc_paths.append(examples["doc_path"][org_batch_index])
             chunk_doc_offsets = [
                 {
@@ -311,7 +284,6 @@ def train_and_predict(
                         # Handles overlap
                         l["matched"] = True
                     if label_dicts:
-                        orig_labels_i.append(label_dicts[0])
                         label = label_dicts[0]["label"]
                     else:
                         label = "<NONE>"
@@ -354,7 +326,6 @@ def train_and_predict(
                     )
             labels.append(label_ids)
             bboxes.append(bbox_inputs)
-            orig_labels.append(orig_labels_i)
 
             if visual_embed:
                 ipath = examples["page_image"][org_batch_index]
@@ -367,7 +338,6 @@ def train_and_predict(
                 assert li.get("matched", False)
 
         tokenized_inputs["labels"] = labels
-        tokenized_inputs["orig_labels"] = orig_labels
         tokenized_inputs["bbox"] = bboxes
         tokenized_inputs["doc_path"] = doc_paths
         tokenized_inputs["token_offsets"] = token_offsets
@@ -486,14 +456,12 @@ def train_and_predict(
 
         predictions, _, _ = trainer.predict(hf_dataset)
         predictions = np.argmax(predictions, axis=2)
-        print(predictions)
         pred_by_path = defaultdict(list)
         for prediction, example in zip(predictions, hf_dataset):
             preds = []
             for pred, offsets in zip(prediction, example["token_offsets"]):
                 pred = label_list[pred]
                 if pred != "<NONE>":
-                    print("Adding non-none pred")
                     preds.append(
                         {
                             "label": pred,
