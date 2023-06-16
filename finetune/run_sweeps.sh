@@ -1,7 +1,7 @@
 #!/bin/bash
 ./get_data.sh
 
-for dataset in charities nda resource_contracts s1
+for dataset in charities nda resource_contracts s1 fcc_invoices
 do
     for finetune_base_model in xdoc roberta-base
     do

@@ -114,6 +114,26 @@ def drop_label_from_dataset(dataset_name, label_name, dataset_dir="datasets"):
         split_df["labels"] = cleaned_labels
         split_df.to_csv(split_path)
 
+def rename_label(dataset_name, label_name, new_label_name, dataset_dir="datasets"):
+    for split in ["train", "test", "val"]:
+        print(f"Processing split {split}")
+        split_path = os.path.join(dataset_dir, dataset_name, f"{split}.csv")
+        split_df = pd.read_csv(split_path)
+        cleaned_labels = []
+        for row_labels in tqdm.tqdm(split_df.labels):
+            cleaned_labels.append(
+                json.dumps(
+                    [
+                        (
+                            l if l["label"] != label_name else {**l, "label": new_label_name}
+                        ) for l in json.loads(row_labels)
+                    ]
+                )
+            )
+        split_df["labels"] = cleaned_labels
+        split_df.to_csv(split_path)
+
+
 def cleanup_files(dataset_name, dataset_dir="datasets"):
     image_files = []
     pdf_files = []
@@ -129,8 +149,9 @@ def cleanup_files(dataset_name, dataset_dir="datasets"):
         assert len(expected) == len(set(expected)) # No duplicate files referenced
         all_files = set(glob.glob(os.path.join(dir, "*")))
         for e in expected:
-            assert e in all_files, e
-            all_files.remove(e)
+            e_full_path = os.path.join(dataset_dir, e)
+            assert e_full_path in all_files, (e, all_files)
+            all_files.remove(e_full_path)
         for f in all_files:
             os.remove(f)
     cleanup(os.path.join(dataset_dir, dataset_name, "ocr"), ocr_files)
@@ -194,5 +215,6 @@ if __name__ == "__main__":
             "deduplicate": deduplicate,
             "remove_leading_path_names": remove_leading_path_names,
             "get_qa_dataset_info_table": get_qa_dataset_info_table,
+            "rename_label": rename_label,
         }
     )
