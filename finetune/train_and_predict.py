@@ -183,7 +183,7 @@ def run_agent(sweep_id, entity, project):
 
 def get_num_runs(sweep_id, entity, project):
     sweep = wandb.Api().sweep(f"{entity}/{project}/{sweep_id}")
-    if sweep.state != "RUNNING":
+    if sweep.state not in {"RUNNING", "PENDING"}:
         print("This sweep is currently {}".format(sweep.state))
         exit(0)
     num_runs = len([None for r in sweep.runs if r.state in {"finished", "running"}])
