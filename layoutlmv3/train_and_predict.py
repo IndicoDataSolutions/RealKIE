@@ -44,7 +44,7 @@ check_min_version("4.5.0")
 
 logger = logging.getLogger(__name__)
 
-TRAINING_LIB = "unilm/layoutlmv3"
+TRAINING_LIB = "layoutlmv3"
 
 
 def overlaps(a, b):
@@ -87,10 +87,10 @@ def add_line_bboxes(page_text, page_tokens):
             tok["line_position"] = line_spans[-1]["position"]
 
 
-def get_dataset(dataset_name, split, dataset_dir):
+def get_dataset_as_pages(dataset_name, split, dataset_dir):
     csv = pd.read_csv(os.path.join(dataset_dir, dataset_name, f"{split}.csv"))
     data = []
-    for row in csv.to_dict("records"):
+    for i, row in enumerate(csv.to_dict("records")):
         labels = json.loads(row["labels"])
         with gzip.open(os.path.join(dataset_dir, row["ocr"]), 'rt') as fp:
             ocr = json.loads(fp.read())
@@ -110,6 +110,19 @@ def get_dataset(dataset_name, split, dataset_dir):
                 "page_offset": doc_offset["start"],
             }
             data.append(item)
+    return data
+
+
+def get_dataset(dataset_name, split, dataset_dir):
+    csv = pd.read_csv(os.path.join(dataset_dir, dataset_name, f"{split}.csv"))
+    data = []
+    for row in csv.to_dict("records"):
+        item = {
+            "text": row["text"],
+            "labels": json.loads(row["labels"]),
+            "doc_path": row["document_path"],
+        }
+        data.append(item)
     return data
 
 def clip_position(pos):
@@ -136,7 +149,7 @@ def clean_preds(preds, text, char_threshold=1):
             output[-1]["end"] = p["end"]
         else:
             output.append(p)
-    for p in preds:
+    for p in output:
         p["text"] = text[p["start"] : p["end"]]
     return output
 
@@ -150,7 +163,6 @@ def undersample_empty_chunks(inputs, empty_chunk_ratio, no_label_idx=0, pad_idx=
             sample_indices.append(i)
         else:
             keep_indices.append(i)
-    print("KEEPING", keep_indices)
     keep_indices = keep_indices + random.sample(
         sample_indices,
         min(len(sample_indices), int(empty_chunk_ratio * len(keep_indices))),
@@ -180,11 +192,10 @@ def train_and_predict(
 ):
     if output_dir is None:
         output_dir = os.path.join("outputs", dataset_name, "model_output")
-    train_dataset = get_dataset(dataset_name, "train", dataset_dir)
     label_list = ["<NONE>"] + sorted(
         set(
             l["label"]
-            for page in train_dataset
+            for page in get_dataset(dataset_name, "train", dataset_dir)
             for l in page["labels"]
             if l["label"] != "<NONE>"
         )
@@ -288,7 +299,6 @@ def train_and_predict(
                     else:
                         label = "<NONE>"
                     label_ids.append(label_to_id[label])
-
                     tol = 0
                     positions = []
                     while not positions:
@@ -297,7 +307,7 @@ def train_and_predict(
                         do = examples["page_offset"][org_batch_index]
                         t_text = examples["text"][org_batch_index][t_start - do: t_end - do]
                         examples["text"]
-                        if tol > 2 and len(t_text.replace(" ", "").replace("\n", "")) > 2:  # Tol of 2 is used commonly for whitespace tokens          
+                        if tol > 2 and len(t_text.replace(" ", "").replace("\n", "")) > 3:  # Tol of 2 is used commonly for whitespace tokens          
                             print(
                                 "Token did not match a position - using the previous token instead. Tol = {}".format(
                                     tol
@@ -316,8 +326,6 @@ def train_and_predict(
                             )
                         ]
                         tol += 1
-                    if len(positions) > 1:
-                        print("Warning - matched multiple position tokens")
                     pos = positions[-1]
                     bbox_inputs.append(
                         get_layoutlm_position(
@@ -348,7 +356,7 @@ def train_and_predict(
 
     def get_hf_dataset(split, is_training=False):
         split_dataset = Dataset.from_generator(
-            lambda: get_dataset(dataset_name, split, dataset_dir=dataset_dir)
+            lambda: get_dataset_as_pages(dataset_name, split, dataset_dir=dataset_dir)
         )
         tokenized = split_dataset.map(
             tokenize_and_align_labels,
@@ -357,7 +365,7 @@ def train_and_predict(
             num_proc=preprocessing_num_workers,
             load_from_cache_file=not overwrite_cache,
         )
-        if is_training and empty_chunk_ratio:
+        if is_training and empty_chunk_ratio is not None:
             tokenized = tokenized.map(
                 functools.partial(
                     undersample_empty_chunks, empty_chunk_ratio=empty_chunk_ratio
@@ -576,7 +584,7 @@ def setup_and_run_sweep(
                 "min": 1e-2,
                 "max": 1000.0,
             },
-            "num_train_epochs": {"distribution": "int_uniform", "min": 1, "max": 16},
+            "num_train_epochs": {"distribution": "int_uniform", "min": 1, "max": 64},
             "per_device_train_batch_size": {
                 "distribution": "int_uniform",
                 "min": 1,

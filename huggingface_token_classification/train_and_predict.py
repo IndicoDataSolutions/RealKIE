@@ -57,7 +57,7 @@ def clean_preds(preds, text, char_threshold=1):
             output[-1]["end"] = p["end"]
         else:
             output.append(p)
-    for p in preds:
+    for p in output:
         p["text"] = text[p["start"] : p["end"]]
     return output
 
