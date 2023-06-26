@@ -43,6 +43,7 @@ def strip_unused_ocr_data(ocr_data: dict):
         page.pop("page_num", None)
     return ocr_data
 
+
 def fix_page_offsets(doc_ocr):
     # This doesn't actually change the data in any important way,
     # but just stops us hitting assertion errors in finetune
@@ -59,14 +60,17 @@ def fix_page_offsets(doc_ocr):
                 consecutive = 0
     return doc_ocr
 
+
 def get_model_input_from_csv(csv, is_document, dataset_dir):
     if is_document:
         ocr = []
         for ocr_file, text in zip(csv.ocr, csv.text):
             ocr_file = os.path.join(dataset_dir, ocr_file)
-            with gzip.open(ocr_file, 'rt') as fp:
+            with gzip.open(ocr_file, "rt") as fp:
                 doc_ocr = json.loads(fp.read())
-                doc_ocr = fix_page_offsets([strip_unused_ocr_data(ocr_page) for ocr_page in doc_ocr])
+                doc_ocr = fix_page_offsets(
+                    [strip_unused_ocr_data(ocr_page) for ocr_page in doc_ocr]
+                )
                 ocr.append(doc_ocr)
             assert "\n".join(page["pages"][0]["text"] for page in ocr[-1]) == text
         return ocr
@@ -78,9 +82,12 @@ def get_dataset(dataset_name, dataset_dir, split, is_document):
     labels = [json.loads(l) for l in csv.labels]
     for t, l in zip(csv.text, labels):
         for li in l:
-            assert t[li["start"]: li["end"]] == li["text"]
-            #del li["text"] # Label checking inside finetune assumes labels cannot span pages.
-    return get_model_input_from_csv(csv, is_document=is_document, dataset_dir=dataset_dir), labels
+            assert t[li["start"] : li["end"]] == li["text"]
+            # del li["text"] # Label checking inside finetune assumes labels cannot span pages.
+    return (
+        get_model_input_from_csv(csv, is_document=is_document, dataset_dir=dataset_dir),
+        labels,
+    )
 
 
 def get_base_model(base_model):
@@ -121,7 +128,11 @@ def get_base_model(base_model):
 
 def run_predictions(model, dataset_name, dataset_dir, split, output_path, is_document):
     test_data = pd.read_csv(get_dataset_path(dataset_name, dataset_dir, split))
-    preds = model.predict(get_model_input_from_csv(test_data, is_document=is_document, dataset_dir=dataset_dir))
+    preds = model.predict(
+        get_model_input_from_csv(
+            test_data, is_document=is_document, dataset_dir=dataset_dir
+        )
+    )
     test_data["preds"] = [json.dumps(p) for p in preds]
     test_data.to_csv(output_path)
 
@@ -136,7 +147,7 @@ def train_and_predict(
     if output_dir is None:
         output_dir = os.path.join("outputs", dataset_name, "model_output")
     model_def = get_base_model(base_model)
-    model = model_def["model_type"](base_model=model_def["base_model"], **model_config,)
+    model = model_def["model_type"](base_model=model_def["base_model"], **model_config)
     model.fit(
         *get_dataset(
             dataset_name, dataset_dir, "train", is_document=model_def["is_document"]
@@ -181,6 +192,7 @@ def run_agent(sweep_id, entity, project):
 
     _run_agent(sweep_id=sweep_id, function=train_model, entity=entity, project=project)
 
+
 def get_num_runs(sweep_id, entity, project):
     sweep = wandb.Api().sweep(f"{entity}/{project}/{sweep_id}")
     if sweep.state not in {"RUNNING", "PENDING"}:
@@ -190,11 +202,19 @@ def get_num_runs(sweep_id, entity, project):
     print(f"Current number of runs {num_runs}")
     return num_runs
 
+
 def _run_agent(sweep_id, function, entity, project):
     while get_num_runs(sweep_id=sweep_id, entity=entity, project=project) <= 100:
-        wandb.agent(sweep_id=sweep_id, function=function, entity=entity, project=project, count=1)
+        wandb.agent(
+            sweep_id=sweep_id,
+            function=function,
+            entity=entity,
+            project=project,
+            count=1,
+        )
     print("This sweep is complete - exiting")
     exit(0)
+
 
 def get_matching_sweep(project, entity, sweep_id_config):
     project = wandb.Api().project(project, entity=entity)
@@ -210,7 +230,7 @@ def get_matching_sweep(project, entity, sweep_id_config):
 
 
 def setup_and_run_sweep(
-    project, entity, dataset_name, base_model, dataset_dir="/datasets",
+    project, entity, dataset_name, base_model, dataset_dir="/datasets"
 ):
     sweep_id_config = {
         "dataset_name": {"value": dataset_name},
