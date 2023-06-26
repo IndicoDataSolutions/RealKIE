@@ -373,7 +373,6 @@ def train_and_predict(
         tokenized = split_dataset.map(
             tokenize_and_align_labels,
             batched=True,
-            batch_size=1,
             remove_columns=split_dataset.column_names,  # Drop all existing columns so that we can change the lengths of the output
             num_proc=preprocessing_num_workers,
             load_from_cache_file=not overwrite_cache,
