@@ -52,7 +52,11 @@ def fix_page_offsets(doc_ocr):
     for i, page in enumerate(doc_ocr):
         if i >= 0:
             page_do = page["pages"][0]["doc_offset"]
-            if page_do["start"] == page_do["end"]:
+            if (
+                page_do["start"] == page_do["end"]
+                and page_do["start"]
+                != doc_ocr[i - 1]["pages"][0]["doc_offset"]["end"] + 1
+            ):
                 consecutive += 1
                 page_do["start"] += consecutive
                 page_do["end"] += consecutive
