@@ -1,7 +1,7 @@
 #!/bin/bash
 ./get_data.sh
 
-for dataset in charities nda resource_contracts s1 fcc_invoices
+for dataset in resource_contracts s1_truncated fcc_invoices # charities nda 
 do
     python3 train_and_predict.py wandb_sweep $PROJECT $ENTITY $dataset
 done

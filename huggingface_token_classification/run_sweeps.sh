@@ -1,7 +1,7 @@
 #!/bin/bash
 ./get_data.sh
 
-for dataset in charities nda resource_contracts s1 fcc_invoices
+for dataset in s1_truncated # charities nda resource_contracts fcc_invoices 
 do
     # Longformer low priority
     for hf_base_model in roberta-base microsoft/deberta-v3-base allenai/longformer-base-4096

@@ -27,8 +27,10 @@ def list_labels(dataset_name, dataset_dir="datasets"):
             counts[l["label"]] += 1
     for label, count in sorted(counts.items(), key=lambda v: v[1]):
         print(f"{label} = {count}")
-    df_raw = pd.read_csv(os.path.join(dataset_dir, dataset_name, "raw_export.csv"))
-    print(f"Number of docs in raw export {len(df_raw)}")
+    raw_export_path = os.path.join(dataset_dir, dataset_name, "raw_export.csv")
+    if os.path.exists(raw_export_path):
+        df_raw = pd.read_csv(raw_export_path)
+        print(f"Number of docs in raw export {len(df_raw)}")
     print(f"Number of docs {len(df.labels)}")
     print(f"Number of unique docs {len(set(df.text))}")
     print(
@@ -340,6 +342,23 @@ def get_qa_dataset_info_table(dataset_dir="datasets"):
         df = pd.read_csv(f)
         print(f, Counter(df.error_type))
 
+def drop_over_page_length(dataset_name, max_num_pages=None, max_num_tokens=None, dataset_dir="datasets"):
+    for split in ["train", "test", "val"]:
+        split_path = os.path.join(dataset_dir, dataset_name, f"{split}.csv")
+        split_records = pd.read_csv(split_path).to_dict("records")
+        output_split_records = []
+        dropped = 0
+        for r in split_records:
+            if max_num_pages is not None and len(json.loads(r["image_files"])) > max_num_pages:
+                dropped += 1
+                continue
+            if max_num_tokens is not None and len(r["text"].split()) > max_num_tokens:
+                dropped += 1
+                continue
+            output_split_records.append(r)
+        print(f"For Split {split} dropped {dropped} out of {len(split_records)}")
+        pd.DataFrame.from_records(output_split_records).to_csv(split_path)       
+
 
 if __name__ == "__main__":
     fire.Fire(
@@ -353,5 +372,6 @@ if __name__ == "__main__":
             "get_qa_dataset_info_table": get_qa_dataset_info_table,
             "rename_label": rename_label,
             "label_statistics": label_statistics,
+            "drop_over_page_length": drop_over_page_length,
         }
     )
