@@ -63,7 +63,7 @@ run_on_all_gpus() {
     done
 }
 
-for dataset in resource_contracts s1_truncated fcc_invoices # charities nda
+for dataset in s1_pages
 do
     for finetune_base_model in xdoc roberta-base 
     # roberta-large

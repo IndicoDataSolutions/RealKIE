@@ -4,6 +4,7 @@ import fire
 import os
 import tqdm
 import glob
+import gzip
 from collections import defaultdict, Counter
 
 
@@ -125,8 +126,8 @@ def label_statistics(dataset_dir="datasets"):
     }
     tables = []
     for group, identifier in [
-        (["fcc_invoices", "s1", "resource_contracts"], "entities-1"),
-        (["charities", "nda"], "entities-1"),
+        (["fcc_invoices", "s1", "s1_pages"], "entities-1"),
+        (["resource_contracts", "charities", "nda"], "entities-1"),
     ]:
         output = dict()
         for dataset_name in group:
@@ -316,8 +317,12 @@ def remove_leading_path_names(dataset_name, dataset_dir="datasets"):
     def strip_path(p):
         if f"{dataset_name}_v2/" in p:
             p = p.replace(f"{dataset_name}_v2/", f"{dataset_name}/")
+        if "trimmed" in p:
+            p = p.replace("trimmed", "s1_pages")
         if p.startswith("datasets/"):
             return p[len("datasets/") :]
+        if p.startswith("./"):
+            return p[len("./"): ]
         return p
 
     for split in ["test", "val", "train"]:
@@ -335,6 +340,46 @@ def remove_leading_path_names(dataset_name, dataset_dir="datasets"):
         pd.DataFrame.from_records(new_records).to_csv(split_path)
 
 
+def gzip_ocr(dataset_name, dataset_dir="datasets"):
+    def get_gzipped_ocr(ocr_file):
+        output_file = ocr_file + ".gz"
+        with open(os.path.join(dataset_dir, ocr_file), "rt") as fp:
+            with gzip.open(os.path.join(dataset_dir, output_file), "wt") as fp_out:
+                fp_out.write(fp.read())
+        return output_file
+
+    for split in ["test", "val", "train"]:
+        split_path = os.path.join(dataset_dir, dataset_name, f"{split}.csv")
+        split_df = pd.read_csv(split_path)
+        new_records = []
+        for row in split_df.to_dict("records"):
+            row["ocr"] = get_gzipped_ocr(row["ocr"])
+            new_records.append(row)
+        pd.DataFrame.from_records(new_records).to_csv(split_path)
+    print("Created gzipped files, verify the output and then manually remove the original jsons.")
+
+def fix_s1_ocr(dataset_name, dataset_dir="datasets"):
+    def fix_ocr(ocr_file):
+        with gzip.open(os.path.join(dataset_dir, ocr_file), "rt") as fp:
+            ocr = json.load(fp)
+        if isinstance(ocr, list):
+            assert len(ocr) == 1
+            ocr_page = ocr[0]
+        else:
+            ocr_page = ocr
+        for char in ocr_page["chars"]:
+            char["page_num"] = 0
+            char["doc_index"] = char["page_index"]
+        with gzip.open(os.path.join(dataset_dir, ocr_file), "wt") as fp_out:
+            json.dump([ocr_page], fp_out)
+        return ocr_file
+
+    for split in ["test", "val", "train"]:
+        split_path = os.path.join(dataset_dir, dataset_name, f"{split}.csv")
+        split_df = pd.read_csv(split_path)
+        for row in split_df.to_dict("records"):
+            fix_ocr(row["ocr"])
+            
 def get_qa_dataset_info_table(dataset_dir="datasets"):
     files = glob.glob(os.path.join(dataset_dir, "*/qa.csv"))
 
@@ -373,5 +418,7 @@ if __name__ == "__main__":
             "rename_label": rename_label,
             "label_statistics": label_statistics,
             "drop_over_page_length": drop_over_page_length,
+            "gzip_ocr": gzip_ocr,
+            "fix_s1_ocr": fix_s1_ocr,
         }
     )
