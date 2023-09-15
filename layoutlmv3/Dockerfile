@@ -11,7 +11,8 @@ RUN apt-get update && \
 
 RUN apt-get update && apt-get install -y software-properties-common gcc git && \
     add-apt-repository -y ppa:deadsnakes/ppa
-RUN apt-get update && apt-get install -y python3.8 python3-distutils python3-pip python3-apt
+RUN apt-get update && apt-get install -y python3.8 python3-distutils python3-pip python3-apt curl unzip
+RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && unzip awscliv2.zip && ./aws/install
 
 RUN pip install torch==1.10.0+cu111 torchvision==0.11.1+cu111 -f https://download.pytorch.org/whl/torch_stable.html
 
@@ -25,3 +26,5 @@ RUN pip3 install -r requirements.txt
 ADD metrics /metrics
 RUN cd /metrics && pip3 install .
 RUN cd /unilm/layoutlmv3 && pip3 install -e .
+ADD layoutlmv3 /layoutlmv3
+ADD scripts/get_data.sh /layoutlmv3

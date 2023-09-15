@@ -57,7 +57,7 @@ def clean_preds(preds, text, char_threshold=1):
             output[-1]["end"] = p["end"]
         else:
             output.append(p)
-    for p in preds:
+    for p in output:
         p["text"] = text[p["start"] : p["end"]]
     return output
 
@@ -337,6 +337,9 @@ def run_agent(sweep_id, entity, project):
 
 def get_num_runs(sweep_id, entity, project):
     sweep = wandb.Api().sweep(f"{entity}/{project}/{sweep_id}")
+    if sweep.state not in {"RUNNING", "PENDING"}:
+        print("This sweep is currently {}".format(sweep.state))
+        exit(0)
     num_runs = len([None for r in sweep.runs if r.state in {"finished", "running"}])
     print(f"Current number of runs {num_runs}")
     return num_runs

@@ -20,9 +20,11 @@ def get_qa_data(dataset_dir, dataset_name):
         df = pd.concat([df, split_df])
     return df[["text", "labels", "document_path", "split", "ocr", "original_filename"]]
 
+
 def get_ocr(ocr_file, dataset_dir):
-    with gzip.open(os.path.join(dataset_dir, ocr_file), 'rt') as fp:
+    with gzip.open(os.path.join(dataset_dir, ocr_file), "rt") as fp:
         return json.loads(fp.read())
+
 
 def main(dataset_name, dataset_dir="datasets"):
     df = get_qa_data(dataset_dir=dataset_dir, dataset_name=dataset_name)
@@ -39,7 +41,7 @@ def main(dataset_name, dataset_dir="datasets"):
         page_boundaries = []
         for r in get_ocr(row["ocr"], dataset_dir):
             page_boundaries.append(
-                {**r["pages"][0]["doc_offset"], "page_num": r["pages"][0]["page_num"],}
+                {**r["pages"][0]["doc_offset"], "page_num": r["pages"][0]["page_num"]}
             )
         labels = json.loads(row["labels"])
         for pi in p:
@@ -62,7 +64,8 @@ def main(dataset_name, dataset_dir="datasets"):
                         ],
                         "page_num": [pb for pb in page_boundaries if overlaps(pb, pi)][
                             0
-                        ]["page_num"] + 1,
+                        ]["page_num"]
+                        + 1,
                         "label": pi["label"],
                     }
                 )
@@ -81,7 +84,8 @@ def main(dataset_name, dataset_dir="datasets"):
                         ],
                         "page_num": [pb for pb in page_boundaries if overlaps(pb, li)][
                             0
-                        ]["page_num"] + 1,
+                        ]["page_num"]
+                        + 1,
                         "label": li["label"],
                     }
                 )

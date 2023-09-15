@@ -28,7 +28,6 @@ from timm.data.constants import (
 )
 from torchvision import transforms
 from transformers import (
-    AutoConfig,
     AutoModelForTokenClassification,
     AutoTokenizer,
     Trainer,
@@ -36,7 +35,9 @@ from transformers import (
 )
 from transformers.utils import check_min_version
 
-from datasets import Dataset, load_metric
+from datasets import Dataset, load_metric, disable_caching
+
+disable_caching()
 from metrics import metrics
 
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
@@ -44,7 +45,7 @@ check_min_version("4.5.0")
 
 logger = logging.getLogger(__name__)
 
-TRAINING_LIB = "unilm/layoutlmv3"
+TRAINING_LIB = "layoutlmv3"
 
 
 def overlaps(a, b):
@@ -87,18 +88,23 @@ def add_line_bboxes(page_text, page_tokens):
             tok["line_position"] = line_spans[-1]["position"]
 
 
-def get_dataset(dataset_name, split, dataset_dir):
+def get_dataset_as_pages(dataset_name, split, dataset_dir):
     csv = pd.read_csv(os.path.join(dataset_dir, dataset_name, f"{split}.csv"))
     data = []
-    for row in csv.to_dict("records"):
+    for i, row in enumerate(csv.to_dict("records")):
         labels = json.loads(row["labels"])
-        ocr = json.loads()
-        with gzip.open(os.path.join(dataset_dir, row["ocr"]), 'rt') as fp:
+        with gzip.open(os.path.join(dataset_dir, row["ocr"]), "rt") as fp:
             ocr = json.loads(fp.read())
         images = json.loads(row["image_files"])
         for page_ocr, page_image in zip(ocr, images):
             doc_offset = page_ocr["pages"][0]["doc_offset"]
-            page_labels = [l for l in labels if overlaps(l, doc_offset)]
+            # Skip labels for empty pages.
+            page_labels = [
+                l
+                for l in labels
+                if overlaps(l, doc_offset)
+                and len(page_ocr["pages"][0]["text"].strip()) > 0
+            ]
             add_line_bboxes(page_ocr["pages"][0]["text"], page_ocr["tokens"])
             item = {
                 "text": page_ocr["pages"][0]["text"],
@@ -114,12 +120,29 @@ def get_dataset(dataset_name, split, dataset_dir):
     return data
 
 
+def get_dataset(dataset_name, split, dataset_dir):
+    csv = pd.read_csv(os.path.join(dataset_dir, dataset_name, f"{split}.csv"))
+    data = []
+    for row in csv.to_dict("records"):
+        item = {
+            "text": row["text"],
+            "labels": json.loads(row["labels"]),
+            "doc_path": row["document_path"],
+        }
+        data.append(item)
+    return data
+
+
+def clip_position(pos):
+    return min(max(int(pos), 0), 1000)
+
+
 def get_layoutlm_position(position, page_size):
     return [
-        int(1000 * position["left"] / page_size["width"]),
-        int(1000 * position["top"] / page_size["height"]),
-        int(1000 * position["right"] / page_size["width"]),
-        int(1000 * position["bottom"] / page_size["height"]),
+        clip_position(1000 * position["left"] / page_size["width"]),
+        clip_position(1000 * position["top"] / page_size["height"]),
+        clip_position(1000 * position["right"] / page_size["width"]),
+        clip_position(1000 * position["bottom"] / page_size["height"]),
     ]
 
 
@@ -135,7 +158,7 @@ def clean_preds(preds, text, char_threshold=1):
             output[-1]["end"] = p["end"]
         else:
             output.append(p)
-    for p in preds:
+    for p in output:
         p["text"] = text[p["start"] : p["end"]]
     return output
 
@@ -149,7 +172,6 @@ def undersample_empty_chunks(inputs, empty_chunk_ratio, no_label_idx=0, pad_idx=
             sample_indices.append(i)
         else:
             keep_indices.append(i)
-    print("KEEPING", keep_indices)
     keep_indices = keep_indices + random.sample(
         sample_indices,
         min(len(sample_indices), int(empty_chunk_ratio * len(keep_indices))),
@@ -163,17 +185,11 @@ def train_and_predict(
     dataset_dir="/datasets",
     empty_chunk_ratio=2.0,
     per_device_train_batch_size=2,
-    gradient_accumulation_steps=1,  # Previously 4
+    gradient_accumulation_steps=1,
     num_train_epochs=16,
     fp16=True,
     model_name_or_path="microsoft/layoutlmv3-base",
-    config_name=None,
-    tokenizer_name=None,
-    task_name="ner",
-    cache_dir=None,
-    model_revision="main",
     input_size=224,
-    use_auth_token=False,
     visual_embed=True,
     imagenet_default_mean_and_std=False,
     train_interpolation="bicubic",
@@ -185,43 +201,24 @@ def train_and_predict(
 ):
     if output_dir is None:
         output_dir = os.path.join("outputs", dataset_name, "model_output")
-    train_dataset = get_dataset(dataset_name, "train", dataset_dir)
     label_list = ["<NONE>"] + sorted(
         set(
             l["label"]
-            for page in train_dataset
+            for page in get_dataset(dataset_name, "train", dataset_dir)
             for l in page["labels"]
             if l["label"] != "<NONE>"
         )
     )
     label_to_id = {l: i for i, l in enumerate(label_list)}
+    id_to_label = {i: l for i, l in enumerate(label_list)}
     num_labels = len(label_list)
 
-    config = AutoConfig.from_pretrained(
-        config_name if config_name else model_name_or_path,
-        num_labels=num_labels,
-        finetuning_task=task_name,
-        cache_dir=cache_dir,
-        revision=model_revision,
-        input_size=input_size,
-        use_auth_token=use_auth_token,
-    )
-    tokenizer = AutoTokenizer.from_pretrained(
-        tokenizer_name if tokenizer_name else model_name_or_path,
-        tokenizer_file=None,  # avoid loading from a cached file of the pre-trained model in another machine
-        cache_dir=cache_dir,
-        use_fast=True,
-        add_prefix_space=True,
-        revision=model_revision,
-        use_auth_token=use_auth_token,
-    )
+    tokenizer = AutoTokenizer.from_pretrained(model_name_or_path, use_fast=True)
     model = AutoModelForTokenClassification.from_pretrained(
         model_name_or_path,
-        from_tf=bool(".ckpt" in model_name_or_path),
-        config=config,
-        cache_dir=cache_dir,
-        revision=model_revision,
-        use_auth_token=use_auth_token,
+        num_labels=num_labels,
+        id2label=id_to_label,
+        label2id=label_to_id,
     )
 
     # Preprocessing the dataset
@@ -271,7 +268,6 @@ def train_and_predict(
         images = []
         doc_paths = []
         token_offsets = []
-        orig_labels = []
         for batch_index in range(len(tokenized_inputs["input_ids"])):
             word_ids = tokenized_inputs.word_ids(batch_index=batch_index)
             offsets = tokenized_inputs.offset_mapping[batch_index]
@@ -280,7 +276,6 @@ def train_and_predict(
             ]
             label_ids = []
             bbox_inputs = []
-            orig_labels_i = []
             doc_paths.append(examples["doc_path"][org_batch_index])
             chunk_doc_offsets = [
                 {
@@ -309,16 +304,24 @@ def train_and_predict(
                         # Handles overlap
                         l["matched"] = True
                     if label_dicts:
-                        orig_labels_i.append(label_dicts[0])
                         label = label_dicts[0]["label"]
                     else:
                         label = "<NONE>"
                     label_ids.append(label_to_id[label])
-
                     tol = 0
                     positions = []
                     while not positions:
-                        if tol > 2:  # Tol of 2 is used commonly for whitespace tokens
+                        t_start = max(0, token_doc_offset["start"] - tol)
+                        t_end = token_doc_offset["end"] + tol
+                        do = examples["page_offset"][org_batch_index]
+                        t_text = examples["text"][org_batch_index][
+                            t_start - do : t_end - do
+                        ]
+                        examples["text"]
+                        if (
+                            tol > 2
+                            and len(t_text.replace(" ", "").replace("\n", "")) > 3
+                        ):  # Tol of 2 is used commonly for whitespace tokens
                             print(
                                 "Token did not match a position - using the previous token instead. Tol = {}".format(
                                     tol
@@ -328,16 +331,10 @@ def train_and_predict(
                             t["line_position"]
                             for t in examples["page_tokens"][org_batch_index]
                             if overlaps(
-                                t["doc_offset"],
-                                {
-                                    "start": token_doc_offset["start"] - tol,
-                                    "end": token_doc_offset["end"],
-                                },
+                                t["doc_offset"], {"start": t_start, "end": t_end}
                             )
                         ]
                         tol += 1
-                    if len(positions) > 1:
-                        print("Warning - matched multiple position tokens")
                     pos = positions[-1]
                     bbox_inputs.append(
                         get_layoutlm_position(
@@ -346,7 +343,6 @@ def train_and_predict(
                     )
             labels.append(label_ids)
             bboxes.append(bbox_inputs)
-            orig_labels.append(orig_labels_i)
 
             if visual_embed:
                 ipath = examples["page_image"][org_batch_index]
@@ -354,12 +350,14 @@ def train_and_predict(
                 for_patches, _ = common_transform(img, augmentation=augmentation)
                 patch = patch_transform(for_patches)
                 images.append(patch)
+        unmatched = []
         for l_batch in examples["labels"]:
             for li in l_batch:
-                assert li.get("matched", False)
+                if not li.get("matched", False):
+                    unmatched.append(li)
+        assert len(unmatched) == 0, unmatched
 
         tokenized_inputs["labels"] = labels
-        tokenized_inputs["orig_labels"] = orig_labels
         tokenized_inputs["bbox"] = bboxes
         tokenized_inputs["doc_path"] = doc_paths
         tokenized_inputs["token_offsets"] = token_offsets
@@ -370,7 +368,7 @@ def train_and_predict(
 
     def get_hf_dataset(split, is_training=False):
         split_dataset = Dataset.from_generator(
-            lambda: get_dataset(dataset_name, split, dataset_dir=dataset_dir)
+            lambda: get_dataset_as_pages(dataset_name, split, dataset_dir=dataset_dir)
         )
         tokenized = split_dataset.map(
             tokenize_and_align_labels,
@@ -379,7 +377,7 @@ def train_and_predict(
             num_proc=preprocessing_num_workers,
             load_from_cache_file=not overwrite_cache,
         )
-        if is_training and empty_chunk_ratio:
+        if is_training and empty_chunk_ratio is not None:
             tokenized = tokenized.map(
                 functools.partial(
                     undersample_empty_chunks, empty_chunk_ratio=empty_chunk_ratio
@@ -438,6 +436,7 @@ def train_and_predict(
             per_device_train_batch_size=per_device_train_batch_size,
             output_dir=output_dir,
             num_train_epochs=num_train_epochs,
+            save_total_limit=1,
             gradient_accumulation_steps=gradient_accumulation_steps,
             **training_args,
         ),
@@ -477,14 +476,12 @@ def train_and_predict(
 
         predictions, _, _ = trainer.predict(hf_dataset)
         predictions = np.argmax(predictions, axis=2)
-        print(predictions)
         pred_by_path = defaultdict(list)
         for prediction, example in zip(predictions, hf_dataset):
             preds = []
             for pred, offsets in zip(prediction, example["token_offsets"]):
                 pred = label_list[pred]
                 if pred != "<NONE>":
-                    print("Adding non-none pred")
                     preds.append(
                         {
                             "label": pred,
@@ -545,6 +542,9 @@ def run_agent(sweep_id, entity, project):
 
 def get_num_runs(sweep_id, entity, project):
     sweep = wandb.Api().sweep(f"{entity}/{project}/{sweep_id}")
+    if sweep.state not in {"RUNNING", "PENDING"}:
+        print("This sweep is currently {}".format(sweep.state))
+        exit(0)
     num_runs = len([None for r in sweep.runs if r.state in {"finished", "running"}])
     print(f"Current number of runs {num_runs}")
     return num_runs
@@ -552,7 +552,13 @@ def get_num_runs(sweep_id, entity, project):
 
 def _run_agent(sweep_id, function, entity, project):
     while get_num_runs(sweep_id=sweep_id, entity=entity, project=project) <= 100:
-        wandb.agent(sweep_id=sweep_id, function=function, entity=entity, project=project, count=1)
+        wandb.agent(
+            sweep_id=sweep_id,
+            function=function,
+            entity=entity,
+            project=project,
+            count=1,
+        )
     print("This sweep is complete - exiting")
     exit(0)
 
@@ -570,9 +576,7 @@ def get_matching_sweep(project, entity, sweep_id_config):
     return None
 
 
-def setup_and_run_sweep(
-    project, entity, dataset_name, dataset_dir="/datasets",
-):
+def setup_and_run_sweep(project, entity, dataset_name, dataset_dir="/datasets"):
     sweep_id_config = {
         "dataset_name": {"value": dataset_name},
         "dataset_dir": {"value": dataset_dir},
@@ -596,7 +600,7 @@ def setup_and_run_sweep(
                 "min": 1e-2,
                 "max": 1000.0,
             },
-            "num_train_epochs": {"distribution": "int_uniform", "min": 1, "max": 16},
+            "num_train_epochs": {"distribution": "int_uniform", "min": 1, "max": 64},
             "per_device_train_batch_size": {
                 "distribution": "int_uniform",
                 "min": 1,

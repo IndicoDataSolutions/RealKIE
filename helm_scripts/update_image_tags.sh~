@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# Check if TAG_VALUE is set
+if [ -z "$IMAGE_TAG" ]; then
+    echo "IMAGE_TAG is not set. Set the environment variable and try again."
+    exit 1
+fi
+
+# Replace placeholder with the value of TAG_VALUE
+sed -i "s/tag: <placeholder>/tag: $TAG_VALUE/g" charts/values.yaml
+
+echo "Replacement complete."
