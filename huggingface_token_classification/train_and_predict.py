@@ -104,42 +104,8 @@ def train_and_predict(
     # Prediction
     logger.info("*** Predict ***")
 
-    def run_predictions(trainer, split, label_list, output_path):
-        hf_dataset = get_hf_dataset(split)
-        orig_dataset = get_dataset(dataset_name, split, dataset_dir)
-
-        predictions, _, _ = trainer.predict(hf_dataset)
-        predictions = np.argmax(predictions, axis=2)
-        pred_by_path = defaultdict(list)
-        for prediction, example in zip(predictions, hf_dataset):
-            preds = []
-            for pred, offsets in zip(prediction, example["token_offsets"]):
-                pred = label_list[pred]
-                if pred != "<NONE>":
-                    preds.append(
-                        {
-                            "label": pred,
-                            "start": offsets["start"],
-                            "end": offsets["end"],
-                        }
-                    )
-            pred_by_path[example["doc_path"]] += preds
-        pred_records = []
-        for row in orig_dataset:
-            pred_records.append(
-                {
-                    "doc_path": row["doc_path"],
-                    "preds": json.dumps(
-                        clean_preds(pred_by_path[row["doc_path"]], row["text"])
-                    ),
-                    "labels": json.dumps(row["labels"]),
-                    "text": row["text"],
-                }
-            )
-        pd.DataFrame.from_records(pred_records).to_csv(output_path)
-
     for split in ["train", "val", "test"]:
-        run_predictions(
+        loader.run_predictions(
             trainer,
             split,
             label_list=loader.label_list,

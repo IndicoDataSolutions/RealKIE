@@ -5,9 +5,12 @@ from transformers import (
 from datasets import Dataset
 
 import evaluate
-from helpers import overlaps, get_dataset, undersample_empty_chunks
+from helpers import overlaps, get_dataset, undersample_empty_chunks, clean_preds
 import numpy as np
 import functools
+from collections import defaultdict
+import json
+import pandas as pd
 
 
 class HFLoader:
@@ -168,3 +171,37 @@ class HFLoader:
             "f1": results["overall_f1"],
             "accuracy": results["overall_accuracy"],
         }
+
+    def run_predictions(self, trainer, split, output_path):
+        hf_dataset = self.get_hf_dataset(split)
+        orig_dataset = get_dataset(self.dataset_name, split, self.dataset_dir)
+
+        predictions, _, _ = trainer.predict(hf_dataset)
+        predictions = np.argmax(predictions, axis=2)
+        pred_by_path = defaultdict(list)
+        for prediction, example in zip(predictions, hf_dataset):
+            preds = []
+            for pred, offsets in zip(prediction, example["token_offsets"]):
+                pred = self.label_list[pred]
+                if pred != "<NONE>":
+                    preds.append(
+                        {
+                            "label": pred,
+                            "start": offsets["start"],
+                            "end": offsets["end"],
+                        }
+                    )
+            pred_by_path[example["doc_path"]] += preds
+        pred_records = []
+        for row in orig_dataset:
+            pred_records.append(
+                {
+                    "doc_path": row["doc_path"],
+                    "preds": json.dumps(
+                        clean_preds(pred_by_path[row["doc_path"]], row["text"])
+                    ),
+                    "labels": json.dumps(row["labels"]),
+                    "text": row["text"],
+                }
+            )
+        pd.DataFrame.from_records(pred_records).to_csv(output_path)
