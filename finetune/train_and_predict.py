@@ -2,7 +2,6 @@ import json
 import os
 import tempfile
 import traceback
-import gzip
 
 import fire
 import pandas as pd
@@ -10,124 +9,20 @@ import wandb
 
 import tensorflow as tf
 
-from finetune import DocumentLabeler, SequenceLabeler
-from finetune.base_models import (
-    BERTLarge,
-    BERTModelCased,
-    LayoutLM,
-    RoBERTa,
-    ROBERTALarge,
-    XDocBase,
+from helpers import (
+    get_matching_sweep,
+    get_num_runs,
+    get_dataset,
+    get_model_input_from_csv,
+    get_dataset_path,
 )
-from metrics import metrics
+from finetune_helpers import get_base_model
+from all_sweep_configs import get_configs_for_model
+
+import metrics
+
 
 TRAINING_LIB = "finetune"
-
-
-def get_dataset_path(dataset_name, dataset_dir, split):
-    return os.path.join(dataset_dir, dataset_name, f"{split}.csv")
-
-
-def strip_unused_ocr_data(ocr_data: dict):
-    ocr_data.pop("chars", None)
-    ocr_data.pop("blocks", None)
-    for token in ocr_data["tokens"]:
-        token.pop("style", None)
-        token.pop("page_offset", None)
-        token.pop("block_offset", None)
-        token.pop("page_num", None)
-    for page in ocr_data["pages"]:
-        page.pop("image", None)
-        page.pop("thumbnail", None)
-        page.pop("ocr_statistics", None)
-        page.pop("page_num", None)
-    return ocr_data
-
-
-def fix_page_offsets(doc_ocr):
-    # This doesn't actually change the data in any important way,
-    # but just stops us hitting assertion errors in finetune
-    # Error comes from long strings of empty pages in resource contracts.
-    consecutive = 0
-    for i, page in enumerate(doc_ocr):
-        if i >= 0:
-            page_do = page["pages"][0]["doc_offset"]
-            if (
-                page_do["start"] == page_do["end"]
-                and page_do["start"]
-                != doc_ocr[i - 1]["pages"][0]["doc_offset"]["end"] + 1
-            ):
-                consecutive += 1
-                page_do["start"] += consecutive
-                page_do["end"] += consecutive
-            else:
-                consecutive = 0
-    return doc_ocr
-
-
-def get_model_input_from_csv(csv, is_document, dataset_dir):
-    if is_document:
-        ocr = []
-        for ocr_file, text in zip(csv.ocr, csv.text):
-            ocr_file = os.path.join(dataset_dir, ocr_file)
-            with gzip.open(ocr_file, "rt") as fp:
-                doc_ocr = json.loads(fp.read())
-                doc_ocr = fix_page_offsets(
-                    [strip_unused_ocr_data(ocr_page) for ocr_page in doc_ocr]
-                )
-                ocr.append(doc_ocr)
-            assert "\n".join(page["pages"][0]["text"] for page in ocr[-1]) == text
-        return ocr
-    return csv.text
-
-
-def get_dataset(dataset_name, dataset_dir, split, is_document):
-    csv = pd.read_csv(get_dataset_path(dataset_name, dataset_dir, split))
-    labels = [json.loads(l) for l in csv.labels]
-    for t, l in zip(csv.text, labels):
-        for li in l:
-            assert t[li["start"] : li["end"]] == li["text"]
-            # del li["text"] # Label checking inside finetune assumes labels cannot span pages.
-    return (
-        get_model_input_from_csv(csv, is_document=is_document, dataset_dir=dataset_dir),
-        labels,
-    )
-
-
-def get_base_model(base_model):
-    base_model = base_model.lower()
-    return {
-        "layoutlm": {
-            "base_model": LayoutLM,
-            "model_type": DocumentLabeler,
-            "is_document": True,
-        },
-        "xdoc": {
-            "base_model": XDocBase,
-            "model_type": DocumentLabeler,
-            "is_document": True,
-        },
-        "bert-base": {
-            "base_model": BERTModelCased,
-            "model_type": SequenceLabeler,
-            "is_document": False,
-        },
-        "roberta-base": {
-            "base_model": RoBERTa,
-            "model_type": SequenceLabeler,
-            "is_document": False,
-        },
-        "bert-large": {
-            "base_model": BERTLarge,
-            "model_type": SequenceLabeler,
-            "is_document": False,
-        },
-        "roberta-large": {
-            "base_model": ROBERTALarge,
-            "model_type": SequenceLabeler,
-            "is_document": False,
-        },
-    }[base_model]
 
 
 def run_predictions(model, dataset_name, dataset_dir, split, output_path, is_document):
@@ -197,16 +92,6 @@ def run_agent(sweep_id, entity, project):
     _run_agent(sweep_id=sweep_id, function=train_model, entity=entity, project=project)
 
 
-def get_num_runs(sweep_id, entity, project):
-    sweep = wandb.Api().sweep(f"{entity}/{project}/{sweep_id}")
-    if sweep.state not in {"RUNNING", "PENDING"}:
-        print("This sweep is currently {}".format(sweep.state))
-        exit(0)
-    num_runs = len([None for r in sweep.runs if r.state in {"finished", "running"}])
-    print(f"Current number of runs {num_runs}")
-    return num_runs
-
-
 def _run_agent(sweep_id, function, entity, project):
     while get_num_runs(sweep_id=sweep_id, entity=entity, project=project) <= 100:
         wandb.agent(
@@ -218,19 +103,6 @@ def _run_agent(sweep_id, function, entity, project):
         )
     print("This sweep is complete - exiting")
     exit(0)
-
-
-def get_matching_sweep(project, entity, sweep_id_config):
-    project = wandb.Api().project(project, entity=entity)
-    try:
-        sweeps = project.sweeps()
-    except wandb.errors.CommError:
-        return None
-    for s in sweeps:
-        sweep_config = s.config["parameters"]
-        if sweep_id_config.items() <= sweep_config.items():
-            return s.id
-    return None
 
 
 def setup_and_run_sweep(
@@ -246,34 +118,7 @@ def setup_and_run_sweep(
     if sweep_id is not None:
         print(f"Resuming Sweep with ID: {sweep_id}")
         return run_agent(sweep_id, entity=entity, project=project)
-
-    sweep_configs = {
-        "method": "bayes",
-        "metric": {"name": "val_macro_f1", "goal": "maximize"},
-        "parameters": {
-            # Add these values in here to make resuming easier.
-            **sweep_id_config,
-            # Sweep Params
-            "auto_negative_sampling": {"values": [False, True]},
-            "max_empty_chunk_ratio": {
-                "distribution": "log_uniform_values",
-                "min": 1e-2,
-                "max": 1000.0,
-            },
-            "lr": {"distribution": "log_uniform_values", "min": 1e-8, "max": 1e-2},
-            "batch_size": {"distribution": "int_uniform", "min": 1, "max": 8},
-            "n_epochs": {"distribution": "int_uniform", "min": 1, "max": 16},
-            "class_weights": {"values": [None, "linear", "sqrt", "log"]},
-            "lr_warmup": {"distribution": "uniform", "min": 0, "max": 0.5},
-            "collapse_whitespace": {"values": [True, False]},
-            "max_grad_norm": {
-                "distribution": "log_uniform_values",
-                "min": 1e-3,
-                "max": 1e5,
-            },
-            "l2_reg": {"distribution": "log_uniform_values", "min": 1e-5, "max": 1.0},
-        },
-    }
+    sweep_configs = get_configs_for_model("finetune", sweep_id_config)
     sweep_id = wandb.sweep(sweep_configs, project=project, entity=entity)
     print(f"Your sweep id is {sweep_id}")
     return run_agent(sweep_id, entity=entity, project=project)

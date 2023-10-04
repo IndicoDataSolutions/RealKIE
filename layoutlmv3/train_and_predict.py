@@ -3,11 +3,9 @@ import functools
 import json
 import logging
 import os
-import random
 import tempfile
 import traceback
 from collections import defaultdict
-import gzip
 
 import fire
 import numpy as np
@@ -37,6 +35,20 @@ from transformers.utils import check_min_version
 
 from datasets import Dataset, load_metric, disable_caching
 
+from helpers import (
+    get_matching_sweep,
+    get_num_runs,
+    clean_preds,
+    undersample_empty_chunks,
+    get_dataset,
+    overlaps,
+)
+from layoutlm_helpers import (
+    get_dataset_as_pages,
+    get_layoutlm_position,
+)
+from all_sweep_configs import get_configs_for_model
+
 disable_caching()
 from metrics import metrics
 
@@ -46,138 +58,6 @@ check_min_version("4.5.0")
 logger = logging.getLogger(__name__)
 
 TRAINING_LIB = "layoutlmv3"
-
-
-def overlaps(a, b):
-    return a["start"] < b["end"] <= a["end"] or b["start"] < a["end"] <= b["end"]
-
-
-def fix_start_end(l, doc_offset):
-    l = dict(l)
-    l["start"] = max(l["start"] - doc_offset["start"], 0)
-    l["end"] = min(
-        l["end"] - doc_offset["start"], doc_offset["end"] - doc_offset["start"]
-    )
-    return l
-
-
-def join_positions(positions):
-    return {
-        "left": min(p["left"] for p in positions),
-        "right": max(p["right"] for p in positions),
-        "top": min(p["top"] for p in positions),
-        "bottom": max(p["bottom"] for p in positions),
-    }
-
-
-def add_line_bboxes(page_text, page_tokens):
-    lines = page_text.split("\n")
-    line_spans = []
-    for line in lines:
-        start = line_spans[-1]["end"] + 1 if line_spans else 0
-        line_spans.append({"start": start, "end": start + len(line)})
-        line_tokens = [
-            tok for tok in page_tokens if overlaps(tok["page_offset"], line_spans[-1])
-        ]
-        if len(line_tokens) == 0:
-            continue
-        line_spans[-1]["position"] = join_positions(
-            [tok["position"] for tok in line_tokens]
-        )
-        for tok in line_tokens:
-            tok["line_position"] = line_spans[-1]["position"]
-
-
-def get_dataset_as_pages(dataset_name, split, dataset_dir):
-    csv = pd.read_csv(os.path.join(dataset_dir, dataset_name, f"{split}.csv"))
-    data = []
-    for i, row in enumerate(csv.to_dict("records")):
-        labels = json.loads(row["labels"])
-        with gzip.open(os.path.join(dataset_dir, row["ocr"]), "rt") as fp:
-            ocr = json.loads(fp.read())
-        images = json.loads(row["image_files"])
-        for page_ocr, page_image in zip(ocr, images):
-            doc_offset = page_ocr["pages"][0]["doc_offset"]
-            # Skip labels for empty pages.
-            page_labels = [
-                l
-                for l in labels
-                if overlaps(l, doc_offset)
-                and len(page_ocr["pages"][0]["text"].strip()) > 0
-            ]
-            add_line_bboxes(page_ocr["pages"][0]["text"], page_ocr["tokens"])
-            item = {
-                "text": page_ocr["pages"][0]["text"],
-                "labels": page_labels,
-                "page_tokens": page_ocr["tokens"],
-                "page_image": os.path.join(dataset_dir, page_image),
-                "page_size": page_ocr["pages"][0]["size"],
-                "doc_path": row["document_path"],
-                "page_num": page_ocr["pages"][0]["page_num"],
-                "page_offset": doc_offset["start"],
-            }
-            data.append(item)
-    return data
-
-
-def get_dataset(dataset_name, split, dataset_dir):
-    csv = pd.read_csv(os.path.join(dataset_dir, dataset_name, f"{split}.csv"))
-    data = []
-    for row in csv.to_dict("records"):
-        item = {
-            "text": row["text"],
-            "labels": json.loads(row["labels"]),
-            "doc_path": row["document_path"],
-        }
-        data.append(item)
-    return data
-
-
-def clip_position(pos):
-    return min(max(int(pos), 0), 1000)
-
-
-def get_layoutlm_position(position, page_size):
-    return [
-        clip_position(1000 * position["left"] / page_size["width"]),
-        clip_position(1000 * position["top"] / page_size["height"]),
-        clip_position(1000 * position["right"] / page_size["width"]),
-        clip_position(1000 * position["bottom"] / page_size["height"]),
-    ]
-
-
-def clean_preds(preds, text, char_threshold=1):
-    preds = sorted(preds, key=lambda x: x["start"])
-    output = []
-    for p in preds:
-        if (
-            output
-            and p["start"] - output[-1]["end"] <= char_threshold
-            and p["label"] == output[-1]["label"]
-        ):
-            output[-1]["end"] = p["end"]
-        else:
-            output.append(p)
-    for p in output:
-        p["text"] = text[p["start"] : p["end"]]
-    return output
-
-
-def undersample_empty_chunks(inputs, empty_chunk_ratio, no_label_idx=0, pad_idx=-100):
-    keep_indices = []
-    sample_indices = []
-    for i, chunk_labels in enumerate(inputs["labels"]):
-        is_empty = all(c in (no_label_idx, pad_idx) for c in chunk_labels)
-        if is_empty:
-            sample_indices.append(i)
-        else:
-            keep_indices.append(i)
-    keep_indices = keep_indices + random.sample(
-        sample_indices,
-        min(len(sample_indices), int(empty_chunk_ratio * len(keep_indices))),
-    )
-    keep_indices = sorted(keep_indices)
-    return {k: [v[i] for i in keep_indices] for k, v in inputs.items()}
 
 
 def train_and_predict(
@@ -513,7 +393,7 @@ def train_and_predict(
         )
 
 
-def get_sweep_config():
+def get_configs_for_model():
     config = dict(**wandb.config)
     tl = config.pop("training_lib")
     assert tl == TRAINING_LIB, f"You are trying to resume a {tl} using {TRAINING_LIB}"
@@ -526,7 +406,7 @@ def run_agent(sweep_id, entity, project):
         try:
             wandb.init(save_code=True)
             with tempfile.TemporaryDirectory() as tmp_dir:
-                train_and_predict(output_dir=tmp_dir, **get_sweep_config())
+                train_and_predict(output_dir=tmp_dir, **get_configs_for_model())
                 for split in ["val", "test"]:
                     split_metrics = metrics.get_metrics_dict(
                         os.path.join(tmp_dir, f"{split}_predictions.csv"), split=split
@@ -538,16 +418,6 @@ def run_agent(sweep_id, entity, project):
             raise
 
     _run_agent(sweep_id=sweep_id, function=train_model, entity=entity, project=project)
-
-
-def get_num_runs(sweep_id, entity, project):
-    sweep = wandb.Api().sweep(f"{entity}/{project}/{sweep_id}")
-    if sweep.state not in {"RUNNING", "PENDING"}:
-        print("This sweep is currently {}".format(sweep.state))
-        exit(0)
-    num_runs = len([None for r in sweep.runs if r.state in {"finished", "running"}])
-    print(f"Current number of runs {num_runs}")
-    return num_runs
 
 
 def _run_agent(sweep_id, function, entity, project):
@@ -563,19 +433,6 @@ def _run_agent(sweep_id, function, entity, project):
     exit(0)
 
 
-def get_matching_sweep(project, entity, sweep_id_config):
-    project = wandb.Api().project(project, entity=entity)
-    try:
-        sweeps = project.sweeps()
-    except wandb.errors.CommError:
-        return None
-    for s in sweeps:
-        sweep_config = s.config["parameters"]
-        if sweep_id_config.items() <= sweep_config.items():
-            return s.id
-    return None
-
-
 def setup_and_run_sweep(project, entity, dataset_name, dataset_dir="/datasets"):
     sweep_id_config = {
         "dataset_name": {"value": dataset_name},
@@ -587,59 +444,7 @@ def setup_and_run_sweep(project, entity, dataset_name, dataset_dir="/datasets"):
     if sweep_id is not None:
         print(f"Resuming Sweep with ID: {sweep_id}")
         return run_agent(sweep_id, entity=entity, project=project)
-
-    sweep_configs = {
-        "method": "bayes",
-        "metric": {"name": "val_macro_f1", "goal": "maximize"},
-        "parameters": {
-            # Add these values in here to make resuming easier.
-            **sweep_id_config,
-            # Sweep Params
-            "empty_chunk_ratio": {
-                "distribution": "log_uniform_values",
-                "min": 1e-2,
-                "max": 1000.0,
-            },
-            "num_train_epochs": {"distribution": "int_uniform", "min": 1, "max": 64},
-            "per_device_train_batch_size": {
-                "distribution": "int_uniform",
-                "min": 1,
-                "max": 2,
-            },
-            "gradient_accumulation_steps": {
-                "distribution": "int_uniform",
-                "min": 1,
-                "max": 8,
-            },
-            "warmup_ratio": {"distribution": "uniform", "min": 0, "max": 0.5},
-            "warmup_steps": {"value": 0},  # To ensure precedence goes to warmup_ratio.
-            "learning_rate": {
-                "distribution": "log_uniform_values",
-                "min": 1e-8,
-                "max": 1e-2,
-            },
-            "weight_decay": {
-                "distribution": "log_uniform_values",
-                "min": 1e-5,
-                "max": 1.0,
-            },
-            "max_grad_norm": {
-                "distribution": "log_uniform_values",
-                "min": 1e-3,
-                "max": 1e5,
-            },
-            "lr_scheduler_type": {
-                "values": [
-                    "linear",
-                    "cosine",
-                    "cosine_with_restarts",
-                    "constant",
-                    "constant_with_warmup",
-                    "inverse_sqrt",
-                ]
-            },
-        },
-    }
+    sweep_configs = get_configs_for_model("layoutlm", sweep_id_config)
     sweep_id = wandb.sweep(sweep_configs, project=project, entity=entity)
     print(f"Your sweep id is {sweep_id}")
     return run_agent(sweep_id, entity=entity, project=project)

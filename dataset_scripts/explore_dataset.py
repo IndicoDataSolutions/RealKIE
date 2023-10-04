@@ -150,76 +150,7 @@ def label_statistics(dataset_dir="datasets"):
 
 ### End Paper Statistics
 
-#### START FROM CHRIS #####
-def summary_stats(by_type):
-    count_dict = counts(by_type)
-    lengths = text_lengths(by_type)
-    summary_by_label = dict()
-    for label, counts_per_doc in count_dict.items():
-        minimum = min(counts_per_doc)
-        maximum = max(counts_per_doc)
-        mean = np.mean(counts_per_doc)
-        summary_by_label[label] = {
-            "min": minimum,
-            "mean": mean,
-            "max": maximum,
-            "min_length": min(lengths[label])[0],
-            "mean_length": np.mean(lengths[label]),
-            "max_length": max(lengths[label])[0],
-        }
-    return pd.DataFrame(
-        dict(sorted(summary_by_label.items(), key=lambda x: x[0].lower()))
-    )
 
-
-def text_lengths(by_type):
-    text_lengths_dict = dict()
-    for label, label_list in by_type.items():
-        text_lengths_dict[label] = []
-        for labels in label_list:
-            for l in labels:
-                spans = l["spans"]
-                text_lengths_dict[label].append([s["end"] - s["start"] for s in spans])
-    return text_lengths_dict
-
-
-def plot_lengths():
-    summary.T[["mean", "mean_length"]].plot.bar(subplots=True, log=True, legend=False)
-    plt.show()
-
-
-def plot_doc_length_histogram(data_set_id):
-    client = create_client(HOST, API_TOKEN_PATH)
-    d = indico_wrapper.Datasets(client)
-    thing = d.get_dataset_metadata(data_set_id)
-    lengths = [t["numPages"] for t in thing if t["name"][-4:].lower() == ".pdf"]
-    plt.hist(lengths)
-    plt.yscale("log")
-    plt.show()
-
-
-def summary_stats(by_type):
-    count_dict = counts(by_type)
-    lengths = text_lengths(by_type)
-    summary_by_label = dict()
-    for label, counts_per_doc in count_dict.items():
-        minimum = min(counts_per_doc)
-        maximum = max(counts_per_doc)
-        mean = np.mean(counts_per_doc)
-        summary_by_label[label] = {
-            "min": minimum,
-            "mean": mean,
-            "max": maximum,
-            "min_length": min(lengths[label])[0],
-            "mean_length": np.mean(lengths[label]),
-            "max_length": max(lengths[label])[0],
-        }
-    return pd.DataFrame(
-        dict(sorted(summary_by_label.items(), key=lambda x: x[0].lower()))
-    )
-
-
-### END FROM CHRIS ###
 def generate_plots(dataset_name, dataset_dir="datasets"):
     # TODO: write me
 
@@ -322,7 +253,7 @@ def remove_leading_path_names(dataset_name, dataset_dir="datasets"):
         if p.startswith("datasets/"):
             return p[len("datasets/") :]
         if p.startswith("./"):
-            return p[len("./"): ]
+            return p[len("./") :]
         return p
 
     for split in ["test", "val", "train"]:
@@ -356,7 +287,10 @@ def gzip_ocr(dataset_name, dataset_dir="datasets"):
             row["ocr"] = get_gzipped_ocr(row["ocr"])
             new_records.append(row)
         pd.DataFrame.from_records(new_records).to_csv(split_path)
-    print("Created gzipped files, verify the output and then manually remove the original jsons.")
+    print(
+        "Created gzipped files, verify the output and then manually remove the original jsons."
+    )
+
 
 def fix_s1_ocr(dataset_name, dataset_dir="datasets"):
     def fix_ocr(ocr_file):
@@ -379,7 +313,8 @@ def fix_s1_ocr(dataset_name, dataset_dir="datasets"):
         split_df = pd.read_csv(split_path)
         for row in split_df.to_dict("records"):
             fix_ocr(row["ocr"])
-            
+
+
 def get_qa_dataset_info_table(dataset_dir="datasets"):
     files = glob.glob(os.path.join(dataset_dir, "*/qa.csv"))
 
@@ -387,14 +322,20 @@ def get_qa_dataset_info_table(dataset_dir="datasets"):
         df = pd.read_csv(f)
         print(f, Counter(df.error_type))
 
-def drop_over_page_length(dataset_name, max_num_pages=None, max_num_tokens=None, dataset_dir="datasets"):
+
+def drop_over_page_length(
+    dataset_name, max_num_pages=None, max_num_tokens=None, dataset_dir="datasets"
+):
     for split in ["train", "test", "val"]:
         split_path = os.path.join(dataset_dir, dataset_name, f"{split}.csv")
         split_records = pd.read_csv(split_path).to_dict("records")
         output_split_records = []
         dropped = 0
         for r in split_records:
-            if max_num_pages is not None and len(json.loads(r["image_files"])) > max_num_pages:
+            if (
+                max_num_pages is not None
+                and len(json.loads(r["image_files"])) > max_num_pages
+            ):
                 dropped += 1
                 continue
             if max_num_tokens is not None and len(r["text"].split()) > max_num_tokens:
@@ -402,7 +343,7 @@ def drop_over_page_length(dataset_name, max_num_pages=None, max_num_tokens=None,
                 continue
             output_split_records.append(r)
         print(f"For Split {split} dropped {dropped} out of {len(split_records)}")
-        pd.DataFrame.from_records(output_split_records).to_csv(split_path)       
+        pd.DataFrame.from_records(output_split_records).to_csv(split_path)
 
 
 if __name__ == "__main__":
