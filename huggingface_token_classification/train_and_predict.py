@@ -1,15 +1,10 @@
-import functools
-import json
 import logging
 import os
 import tempfile
 import traceback
 from collections import defaultdict
 
-import evaluate
 import fire
-import numpy as np
-import pandas as pd
 import wandb
 from transformers import (
     DataCollatorForTokenClassification,
@@ -23,7 +18,6 @@ from hf_helpers import HFLoader
 from helpers import (
     get_matching_sweep,
     get_num_runs,
-    clean_preds,
     get_dataset,
 )
 from all_sweep_configs import get_configs_for_model
