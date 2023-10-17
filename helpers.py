@@ -3,6 +3,10 @@ import random
 import os
 import pandas as pd
 import json
+import tempfile
+import traceback
+import metrics
+import tensorflow as tf
 
 
 def get_num_runs(sweep_id, entity, project):
@@ -26,6 +30,47 @@ def get_matching_sweep(project, entity, sweep_id_config):
         if sweep_id_config.items() <= sweep_config.items():
             return s.id
     return None
+
+
+def get_sweep_config(training_lib):
+    config = dict(**wandb.config)
+    tl = config.pop("training_lib")
+    assert tl == training_lib, f"You are trying to resume a {tl} using {training_lib}"
+    return config
+
+
+def run_agent(sweep_id, entity, project, train_and_predict, training_lib):
+    def train_model():
+        try:
+            wandb.init(save_code=True)
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                train_and_predict(output_dir=tmp_dir, **get_sweep_config(training_lib))
+                for split in ["val", "test"]:
+                    split_metrics = metrics.get_metrics_dict(
+                        os.path.join(tmp_dir, f"{split}_predictions.csv"), split=split
+                    )
+                    wandb.log(split_metrics)
+        except:
+            # Seems like this method of running with wandb swallows the tracebacks.
+            print(traceback.format_exc())
+            raise
+        finally:
+            tf.compat.v1.reset_default_graph()
+
+    _run_agent(sweep_id=sweep_id, function=train_model, entity=entity, project=project)
+
+
+def _run_agent(sweep_id, function, entity, project):
+    while get_num_runs(sweep_id=sweep_id, entity=entity, project=project) <= 100:
+        wandb.agent(
+            sweep_id=sweep_id,
+            function=function,
+            entity=entity,
+            project=project,
+            count=1,
+        )
+    print("This sweep is complete - exiting")
+    exit(0)
 
 
 def overlaps(a, b):

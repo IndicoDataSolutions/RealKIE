@@ -1,23 +1,20 @@
 import logging
 import os
-import tempfile
-import traceback
-from collections import defaultdict
-
 import fire
+
 import wandb
+
 from transformers import (
     DataCollatorForTokenClassification,
     Trainer,
     TrainingArguments,
 )
 
-from metrics import metrics
 
 from hf_helpers import HFLoader
 from helpers import (
     get_matching_sweep,
-    get_num_runs,
+    run_agent,
     get_dataset,
 )
 from all_sweep_configs import get_configs_for_model
@@ -73,7 +70,7 @@ def train_and_predict(
         eval_dataset=eval_dataset,
         tokenizer=loader.tokenizer,
         data_collator=data_collator,
-        compute_metrics=lambda p: loader.compute_metrics(p),
+        compute_metrics=loader.compute_metrics,
     )
 
     train_result = trainer.train()
@@ -102,56 +99,12 @@ def train_and_predict(
         loader.run_predictions(
             trainer,
             split,
-            label_list=loader.label_list,
             output_path=os.path.join(output_dir, f"{split}_predictions.csv"),
         )
 
 
-def get_sweep_config():
-    config = dict(**wandb.config)
-    tl = config.pop("training_lib")
-    assert tl == TRAINING_LIB, f"You are trying to resume a {tl} using {TRAINING_LIB}"
-    return config
-
-
-def run_agent(sweep_id, entity, project):
-    def train_model():
-        try:
-            wandb.init(save_code=True)
-            with tempfile.TemporaryDirectory() as tmp_dir:
-                train_and_predict(output_dir=tmp_dir, **get_sweep_config())
-                for split in ["val", "test"]:
-                    split_metrics = metrics.get_metrics_dict(
-                        os.path.join(tmp_dir, f"{split}_predictions.csv"), split=split
-                    )
-                    wandb.log(split_metrics)
-        except:
-            # Seems like this method of running with wandb swallows the tracebacks.
-            print(traceback.format_exc())
-            raise
-
-    _run_agent(sweep_id=sweep_id, function=train_model, entity=entity, project=project)
-
-
-def _run_agent(sweep_id, function, entity, project):
-    while get_num_runs(sweep_id=sweep_id, entity=entity, project=project) <= 100:
-        wandb.agent(
-            sweep_id=sweep_id,
-            function=function,
-            entity=entity,
-            project=project,
-            count=1,
-        )
-    print("This sweep is complete - exiting")
-    exit(0)
-
-
 def setup_and_run_sweep(
-    project,
-    entity,
-    dataset_name,
-    base_model,
-    dataset_dir="/datasets",
+    project, entity, dataset_name, base_model, dataset_dir="/datasets"
 ):
     sweep_id_config = {
         "dataset_name": {"value": dataset_name},
@@ -162,11 +115,23 @@ def setup_and_run_sweep(
     sweep_id = get_matching_sweep(project, entity, sweep_id_config)
     if sweep_id is not None:
         print(f"Resuming Sweep with ID: {sweep_id}")
-        return run_agent(sweep_id, entity=entity, project=project)
-    sweep_configs = get_configs_for_model("hf", sweep_id_config)
+        return run_agent(
+            sweep_id,
+            entity=entity,
+            project=project,
+            training_lib=TRAINING_LIB,
+            train_and_predict=train_and_predict,
+        )
+    sweep_configs = get_configs_for_model(TRAINING_LIB, sweep_id_config)
     sweep_id = wandb.sweep(sweep_configs, project=project, entity=entity)
     print(f"Your sweep id is {sweep_id}")
-    return run_agent(sweep_id, entity=entity, project=project)
+    return run_agent(
+        sweep_id,
+        entity=entity,
+        project=project,
+        training_lib=TRAINING_LIB,
+        train_and_predict=train_and_predict,
+    )
 
 
 if __name__ == "__main__":
