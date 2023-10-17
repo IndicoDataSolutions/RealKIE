@@ -47,17 +47,15 @@ class HFLoader:
             )
         )
 
-    def initialize_model_and_tokenizer(
-        self, base_model, num_labels, id_to_label, label_to_id
-    ):
-        tokenizer = AutoTokenizer.from_pretrained(base_model)
-        if "deberta" in base_model:
+    def initialize_model_and_tokenizer(self):
+        tokenizer = AutoTokenizer.from_pretrained(self.base_model)
+        if "deberta" in self.base_model:
             tokenizer.model_max_length = 512
         model = AutoModelForTokenClassification.from_pretrained(
-            base_model,
-            num_labels=num_labels,
-            id2label=id_to_label,
-            label2id=label_to_id,
+            self.base_model,
+            num_labels=len(self.label_list),
+            id2label=self.id_to_label,
+            label2id=self.label_to_id,
         )
         return model, tokenizer
 
