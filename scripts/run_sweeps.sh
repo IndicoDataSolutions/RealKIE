@@ -79,10 +79,3 @@ do
 
     run_on_all_gpus layoutlmv3 python3 train_and_predict.py wandb_sweep $PROJECT $ENTITY $dataset
 done
-
-for dataset in s1 resource_contracts
-    for hf_base_model in Rakib/roberta-base-on-cuad
-    do 
-        run_on_all_gpus huggingface python3 train_and_predict.py wandb_sweep $PROJECT $ENTITY $dataset $hf_base_model
-    done
-done

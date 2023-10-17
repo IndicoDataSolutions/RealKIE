@@ -149,22 +149,6 @@ def fix_page_offsets(doc_ocr):
     return doc_ocr
 
 
-def get_model_input_from_csv(csv, is_document, dataset_dir):
-    if is_document:
-        ocr = []
-        for ocr_file, text in zip(csv.ocr, csv.text):
-            ocr_file = os.path.join(dataset_dir, ocr_file)
-            with gzip.open(ocr_file, "rt") as fp:
-                doc_ocr = json.loads(fp.read())
-                doc_ocr = fix_page_offsets(
-                    [strip_unused_ocr_data(ocr_page) for ocr_page in doc_ocr]
-                )
-                ocr.append(doc_ocr)
-            assert "\n".join(page["pages"][0]["text"] for page in ocr[-1]) == text
-        return ocr
-    return csv.text
-
-
 def get_dataset_path(dataset_name, dataset_dir, split):
     return os.path.join(dataset_dir, dataset_name, f"{split}.csv")
 
