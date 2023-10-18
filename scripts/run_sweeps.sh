@@ -10,25 +10,6 @@ cleanup() {
 # Trap the SIGINT signal and execute the cleanup function
 trap cleanup SIGINT
 
-run_on_all_gpus_old() {
-    local container="$1"
-    shift
-    local command="$@"
-    local pids=()
-
-    for gpu in "${GPUS[@]}"; do
-        echo "Running on GPU ${gpu}"
-        (docker-compose exec -T -e CUDA_VISIBLE_DEVICES="${gpu}" "${container}" ${command}) &
-        pids+=($!)
-        # Sleep for plenty of time to allow static files to download and avoic race consitions with wandb sweep initialization
-        sleep 600
-    done
-
-    for pid in "${pids[@]}"; do
-        wait "${pid}"
-    done
-}
-
 run_on_all_gpus() {
     local container="$1"
     shift

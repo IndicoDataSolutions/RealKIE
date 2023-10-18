@@ -151,14 +151,6 @@ def label_statistics(dataset_dir="datasets"):
 ### End Paper Statistics
 
 
-def generate_plots(dataset_name, dataset_dir="datasets"):
-    # TODO: write me
-
-    # Table of label frequency, average length, min length, max length.
-    # Table of doc lengths in chars, words, pages.
-    pass
-
-
 def drop_label_from_dataset(dataset_name, label_name, dataset_dir="datasets"):
     for split in ["train", "test", "val"]:
         print(f"Processing split {split}")
@@ -350,7 +342,6 @@ if __name__ == "__main__":
     fire.Fire(
         {
             "list_labels": list_labels,
-            "generate_plots": generate_plots,
             "drop_label": drop_label_from_dataset,
             "cleanup_files": cleanup_files,
             "deduplicate": deduplicate,

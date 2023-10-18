@@ -4,12 +4,9 @@ import gzip
 
 import fire
 import pandas as pd
+from helpers import overlaps
 
 from finetune import SequenceLabeler
-
-
-def overlaps(a, b):
-    return a["start"] < b["end"] <= a["end"] or b["start"] < a["end"] <= b["end"]
 
 
 def get_qa_data(dataset_dir, dataset_name):
