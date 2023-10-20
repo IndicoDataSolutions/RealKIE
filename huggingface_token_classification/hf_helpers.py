@@ -5,7 +5,7 @@ from transformers import (
 from datasets import Dataset
 
 import evaluate
-from helpers import overlaps, get_dataset, undersample_empty_chunks, clean_preds
+from utils.helpers import overlaps, get_dataset, undersample_empty_chunks, clean_preds
 import numpy as np
 import functools
 from collections import defaultdict
