@@ -14,7 +14,7 @@ from transformers import (
 from transformers.utils import check_min_version
 
 
-from helpers import (
+from utils.helpers import (
     get_matching_sweep,
     run_agent,
 )

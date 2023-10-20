@@ -5,7 +5,7 @@ import fire
 import pandas as pd
 import wandb
 
-from helpers import (
+from utils.helpers import (
     get_matching_sweep,
     get_dataset,
     get_model_input_from_csv,
