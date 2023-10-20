@@ -2,7 +2,7 @@ import os
 import gzip
 import json
 
-from helpers import fix_page_offsets, strip_unused_ocr_data
+from utils.helpers import fix_page_offsets, strip_unused_ocr_data
 
 from finetune.base_models import (
     BERTLarge,

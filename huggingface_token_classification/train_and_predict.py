@@ -12,7 +12,7 @@ from transformers import (
 
 
 from hf_helpers import HFLoader
-from helpers import (
+from utils.helpers import (
     get_matching_sweep,
     run_agent,
     get_dataset,

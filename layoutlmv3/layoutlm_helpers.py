@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 from collections import defaultdict
 
-from helpers import overlaps, get_dataset, clean_preds
+from utils.helpers import overlaps, get_dataset, clean_preds
 from transformers import (
     AutoModelForTokenClassification,
     AutoTokenizer,

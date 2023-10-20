@@ -4,7 +4,7 @@ import gzip
 
 import fire
 import pandas as pd
-from helpers import overlaps
+from utils.helpers import overlaps
 
 from finetune import SequenceLabeler
 
