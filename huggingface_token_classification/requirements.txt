@@ -1,0 +1,10 @@
+datasets
+evaluate
+tokenizers
+transformers
+sentencepiece
+fire
+seqeval
+wandb
+protobuf==3.20.3
+accelerate>=0.20.1
