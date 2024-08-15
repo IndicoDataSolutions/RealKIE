@@ -15,3 +15,9 @@ bash scripts/run_sweeps.sh
 You will need to modify the variables at the top of the run_sweeps.sh script to point to the correct Weights and Biases entity and project.
 The results will be available on Weights and Biases. Some scripts for analysis can be found in `results_analysis_scripts/`
 
+## Visualization
+
+To visualize the data
+* First download the data to <repo_path>/datasets/
+* install streamlit `pip install streamlit`
+* from the root of the repo run `streamlit run visualization/visualize_data.py`
