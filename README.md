@@ -4,6 +4,8 @@
 
 Run `aws s3 sync s3://project-fruitfly <destination> --endpoint-url=https://s3.us-east-2.wasabisys.com --no-sign-request` to pull the data.
 
+A backup copy of our datasets is available at https://zenodo.org/records/13327077 in case of issues with Wasabi.
+
 ## Running Baselines
 
 to run the baselines
