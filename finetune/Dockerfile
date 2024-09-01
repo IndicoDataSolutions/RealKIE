@@ -1,4 +1,4 @@
-FROM tensorflow/tensorflow:2.11.0-gpu
+FROM tensorflow/tensorflow:2.17.0-gpu
 
 # Note - this is not a complete finetune image and custom op build will fail
 RUN apt-get update && apt install -y git
